@@ -1,57 +1,98 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
- * (C) Copyright IBM Corp. 2010, 2015
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *     
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	<groupId>com.ibm.systemml</groupId>
-	<version>0.9.0-SNAPSHOT</version>
-	<artifactId>system-ml</artifactId>
-	<packaging>jar</packaging>
-	<name>SystemML compiler</name>
-
 	<parent>
 		<groupId>org.apache</groupId>
 		<artifactId>apache</artifactId>
 		<version>17</version>
 	</parent>
+	<groupId>org.apache.systemml</groupId>
+	<version>0.9.0-SNAPSHOT</version>
+	<artifactId>system-ml</artifactId>
+	<packaging>jar</packaging>
+	<name>SystemML</name>
+	<description>Declarative machine learning</description>
+	<url>http://systemml.apache.org/</url>
+	<licenses>
+		<license>
+			<name>Apache 2.0 License</name>
+			<url>http://www.apache.org/licenses/LICENSE-2.0.html</url>
+		</license>
+	</licenses>
+	<scm>
+		<connection>scm:git:git@github.com:apache/incubator-systemml</connection>
+		<developerConnection>scm:git:https://git-wip-us.apache.org/repos/asf/incubator-systemml</developerConnection>
+		<url>scm:git:git@github.com:apache/incubator-systemml</url>
+		<tag>HEAD</tag>
+	</scm>
+	<issueManagement>
+		<system>JIRA</system>
+		<url>https://issues.apache.org/jira/browse/SYSTEMML</url>
+	</issueManagement>
+	<mailingLists>
+		<mailingList>
+			<name>Dev Mailing List</name>
+			<post>dev@systemml.incubator.apache.org</post>
+			<subscribe>dev-subscribe@systemml.incubator.apache.org</subscribe>
+			<unsubscribe>dev-unsubscribe@systemml.incubator.apache.org</unsubscribe>
+		</mailingList>
+		<mailingList>
+			<name>Commits Mailing List</name>
+			<post>commits@systemml.incubator.apache.org</post>
+			<subscribe>commits-subscribe@systemml.incubator.apache.org</subscribe>
+			<unsubscribe>commits-unsubscribe@systemml.incubator.apache.org</unsubscribe>
+		</mailingList>
+	</mailingLists>
+
+	<properties>
+		<hadoop.version>2.4.1</hadoop.version>
+		<antlr.version>4.3</antlr.version>
+
+		<!-- OS-specific JVM arguments for running integration tests -->
+		<integrationTestExtraJVMArgs />
+	</properties>
 
 	<build>
 		<plugins>
-		
-		<plugin>  
-		   <groupId>org.codehaus.mojo</groupId>  
-		   <artifactId>exec-maven-plugin</artifactId>  
-		   <version>1.1.1</version>  
-		   <executions>  
-		    <execution>  
-		     <phase>pre-integration-test</phase>  
-		     <goals>  
-		      <goal>java</goal>  
-		     </goals>  
-		     <configuration>  
-		      <mainClass>com.ibm.bi.dml.utils.InstallDependencyForIntegrationTests</mainClass>	
-				<arguments>  
-       				<argument>${skipTests}</argument>
-       			</arguments>
-		     </configuration>  
-		    </execution>  
-		   </executions>  
-		  </plugin>
-		
+
+			<plugin>
+				<groupId>org.codehaus.mojo</groupId>
+				<artifactId>exec-maven-plugin</artifactId>
+				<version>1.1.1</version>
+				<executions>
+					<execution>
+						<phase>pre-integration-test</phase>
+						<goals>
+							<goal>java</goal>
+						</goals>
+						<configuration>
+							<mainClass>org.apache.sysml.utils.InstallDependencyForIntegrationTests</mainClass>
+							<arguments>
+								<argument>${skipTests}</argument>
+							</arguments>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-dependency-plugin</artifactId>
@@ -91,7 +132,7 @@
 					</execution>
 				</executions>
 			</plugin>
-		
+
 			<!-- PLEASE DO NOT REMOVE! NEEDED to "PACKAGE" ANTLR RUNTIME INTO SYSTEMML.JAR -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -107,8 +148,8 @@
 				</executions>
 
 				<configuration>
-					<!-- Include signature files so that recent versions of Java will run 
-						the resulting jar without complaining about "Invalid signature file digest 
+					<!-- Include signature files so that recent versions of Java will run
+						the resulting jar without complaining about "Invalid signature file digest
 						for Manifest main attributes". -->
 					<filters>
 						<filter>
@@ -122,8 +163,7 @@
 					</filters>
 				</configuration>
 			</plugin>
-			
-			
+
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>build-helper-maven-plugin</artifactId>
@@ -145,8 +185,7 @@
 					</execution>
 				</executions>
 			</plugin>
-			
-			
+
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
@@ -154,72 +193,6 @@
 					<source>1.6</source>
 					<target>1.6</target>
 				</configuration>
-			</plugin>
-
-
-			<plugin>
-				<artifactId>maven-assembly-plugin</artifactId>
-				<version>2.4</version><!--$NO-MVN-MAN-VER$-->
-				<executions>
-					<execution>
-						<id>create-package-assembly</id>
-						<phase>package</phase>
-						<goals>
-							<goal>single</goal>
-						</goals>
-						<configuration>
-							<skipAssembly>true</skipAssembly>
-						</configuration>
-					</execution>
-					<execution>
-						<id>create-source-distribution-assembly</id>
-						<phase>package</phase>
-						<goals>
-							<goal>single</goal>
-						</goals>
-						<configuration>
-							<descriptors>
-								<descriptor>src/assembly/source.xml</descriptor>
-							</descriptors>
-						</configuration>
-					</execution>
-					<execution>
-						<id>create-cluster-binary-distribution-assembly</id>
-						<phase>package</phase>
-						<goals>
-							<goal>single</goal>
-						</goals>
-						<configuration>
-							<descriptors>
-								<descriptor>src/assembly/distrib.xml</descriptor>
-							</descriptors>
-						</configuration>
-					</execution>
-					<execution>
-						<id>create-standalone-assembly</id>
-						<phase>package</phase>
-						<goals>
-							<goal>single</goal>
-						</goals>
-						<configuration>
-							<descriptors>
-								<descriptor>src/assembly/standalone.xml</descriptor>
-							</descriptors>
-						</configuration>
-					</execution>
-					<execution>
-						<id>create-inmemory-jar</id>
-						<phase>package</phase>
-						<goals>
-							<goal>single</goal>
-						</goals>
-						<configuration>
-							<descriptors>
-								<descriptor>src/assembly/inmemory.xml</descriptor>
-							</descriptors>
-						</configuration>
-					</execution>
-				</executions>
 			</plugin>
 
 			<plugin>
@@ -234,7 +207,7 @@
 						<!-- </manifest> -->
 						<manifestEntries>
 							<Build-Timestamp>${maven.build.timestamp}</Build-Timestamp>
-							<Main-Class>com.ibm.bi.dml.api.DMLScript</Main-Class>
+							<Main-Class>org.apache.sysml.api.DMLScript</Main-Class>
 						</manifestEntries>
 					</archive>
 				</configuration>
@@ -274,7 +247,7 @@
 					<sourceDirectory>${basedir}/src/main/java</sourceDirectory>
 					<outputDirectory>${basedir}/src/main/java</outputDirectory>
 				</configuration>
-				<version>4.3</version>
+				<version>${antlr.version}</version>
 				<executions>
 					<execution>
 						<id>antlr</id>
@@ -291,16 +264,16 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<version>2.18</version><!--$NO-MVN-MAN-VER$-->
 				<configuration>
-					
+
 					<!-- STDERR/STDOUT to individual .txt files instead of console -->
 					<redirectTestOutputToFile>true</redirectTestOutputToFile>
 
-					<!-- Run (num cores) test harness classes in parallel, each in a separate 
+					<!-- Run (num cores) test harness classes in parallel, each in a separate
 						process -->
 					<forkCount>1C</forkCount>
 					<reuseForks>true</reuseForks>
 
-					<!-- Third argument prevents Java from popping up lots of windows on 
+					<!-- Third argument prevents Java from popping up lots of windows on
 						MacOS -->
 					<argLine>-Dfile.encoding=UTF-8 -Xmx2g -Xms2g -Xmn200m -Djava.awt.headless=true</argLine>
 
@@ -334,7 +307,7 @@
 					</execution>
 				</executions>
 				<configuration>
-							
+
 					<!-- STDERR/STDOUT to individual .txt files instead of console -->
 					<redirectTestOutputToFile>true</redirectTestOutputToFile>
 
@@ -346,53 +319,27 @@
 					<forkCount>0.5C</forkCount>
 					<reuseForks>false</reuseForks>
 
-					<!-- Last argument prevents Java from popping up lots of windows on 
+					<!-- Last argument prevents Java from popping up lots of windows on
 						MacOS -->
 					<argLine>-Dfile.encoding=UTF-8 -Xmx2g -Xms2g -Xmn200m
 						${integrationTestExtraJVMArgs}
 						-Djava.awt.headless=true</argLine>
 
 					<includes>
-						<include>**/integration/**/*Suite.java</include>
-						
-						<!-- <include>**/integration/functions/aggregate/*Test.java</include> -->
-						<include>**/integration/functions/append/*Test.java</include>
-						<include>**/integration/functions/binary/matrix/*Test.java</include>
-						<include>**/integration/functions/binary/matrix_full_cellwise/*Test.java</include>
-						<include>**/integration/functions/binary/matrix_full_other/*Test.java</include>
-						<include>**/integration/functions/data/*Test*.java</include>
-						<include>**/integration/functions/indexing/*Test.java</include>
-						<include>**/integration/functions/parfor/*Test.java</include>
-						<include>**/integration/functions/quaternary/*Test.java</include>
-						<include>**/integration/functions/recompile/*Test.java</include>
-						<include>**/integration/functions/reorg/*Test.java</include>
-						<include>**/integration/functions/ternary/*Test.java</include>
-						<include>**/integration/functions/transform/*Test.java</include>
-						<include>**/integration/functions/unary/matrix/*Test.java</include>
+						<include>**/integration/applications/**/*Suite.java</include>
+						<include>**/integration/functions/gdfo/*Suite.java</include>
+						<include>**/integration/functions/**/*Test*.java</include>
+						<include>**/integration/scalability/**/*Test.java</include>
 					</includes>
 
 					<excludes>
-						<!-- <exclude>**/integration/functions/aggregate/*Suite.java</exclude> -->
-						<exclude>**/integration/functions/append/*Suite.java</exclude>
-						<exclude>**/integration/functions/binary/matrix/*Suite.java</exclude>
-						<exclude>**/integration/functions/binary/matrix_full_cellwise/*Suite.java</exclude>
-						<exclude>**/integration/functions/binary/matrix_full_other/*Suite.java</exclude>
-						<exclude>**/integration/functions/data/*Suite.java</exclude>
-						<exclude>**/integration/functions/indexing/*Suite.java</exclude>
-						<exclude>**/integration/functions/parfor/*Suite.java</exclude>
-						<exclude>**/integration/functions/quaternary/*Suite.java</exclude>
-						<exclude>**/integration/functions/recompile/*Suite.java</exclude>
-						<exclude>**/integration/functions/reorg/*Suite.java</exclude>
-						<exclude>**/integration/functions/ternary/*Suite.java</exclude>
-						<exclude>**/integration/functions/transform/*Suite.java</exclude>
-						<exclude>**/integration/functions/unary/matrix/*Suite.java</exclude>
 						<exclude>**/slowtest/**</exclude>
 					</excludes>
 
 				</configuration>
 			</plugin>
 
-		<!-- Prevent m2e warnings about the use of maven-remote-resources-plugin 
+		<!-- Prevent m2e warnings about the use of maven-remote-resources-plugin
 		in the Maven archetype that we currently use for this project. -->
 			<plugin>
 				<groupId>org.eclipse.m2e</groupId>
@@ -426,9 +373,9 @@
 
 
 	<profiles>
-	<!-- Profile for Windows builds. Not currently needed, but might be needed 
-		in the future. -->
 		<profile>
+			<!-- Profile for Windows builds. Not currently needed, but might be needed
+				in the future. -->
 			<id>platform-windows</id>
 			<activation>
 				<os>
@@ -440,25 +387,131 @@
 				<integrationTestExtraJVMArgs />
 			</properties>
 		</profile>
+
+		<profile>
+			<id>rat</id>
+			<build>
+				<defaultGoal>clean org.apache.rat:apache-rat-plugin:check</defaultGoal>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.rat</groupId>
+						<artifactId>apache-rat-plugin</artifactId>
+						<version>0.11</version>
+						<executions>
+							<execution>
+								<phase>package</phase>
+								<goals>
+									<goal>check</goal>
+								</goals>
+							</execution>
+						</executions>
+						<configuration>
+							<excludes>
+								<exclude>.gitignore</exclude>
+								<exclude>.repository/</exclude>
+								<exclude>.idea/</exclude>
+								<exclude>.git</exclude>
+								<exclude>.settings</exclude>
+								<exclude>.classpath</exclude>
+								<exclude>.project</exclude>
+								<exclude>docs</exclude>
+								<exclude>**/*.csv</exclude>
+								<exclude>**/*.json</exclude>
+								<exclude>**/*.mtx</exclude>
+								<exclude>**/*.mtd</exclude>
+								<exclude>**/target/**</exclude>
+								<exclude>**/README.md</exclude>
+							</excludes>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+
+		<profile>
+			<!-- Profile to create binary distributions.
+				Execute with `mvn clean package -P distribution` -->
+			<id>distribution</id>
+			<build>
+				<plugins>
+					<plugin>
+						<artifactId>maven-assembly-plugin</artifactId>
+						<version>2.4</version><!--$NO-MVN-MAN-VER$-->
+						<executions>
+							<execution>
+								<id>create-source-distribution-assembly</id>
+								<phase>package</phase>
+								<goals>
+									<goal>single</goal>
+								</goals>
+								<configuration>
+									<descriptors>
+										<descriptor>src/assembly/source.xml</descriptor>
+									</descriptors>
+								</configuration>
+							</execution>
+
+							<execution>
+								<id>create-cluster-binary-distribution-assembly</id>
+								<phase>package</phase>
+								<goals>
+									<goal>single</goal>
+								</goals>
+								<configuration>
+									<descriptors>
+										<descriptor>src/assembly/distrib.xml</descriptor>
+									</descriptors>
+								</configuration>
+							</execution>
+
+							<execution>
+								<id>create-standalone-assembly</id>
+								<phase>package</phase>
+								<goals>
+									<goal>single</goal>
+								</goals>
+								<configuration>
+									<descriptors>
+										<descriptor>src/assembly/standalone.xml</descriptor>
+									</descriptors>
+								</configuration>
+							</execution>
+
+							<execution>
+								<id>create-inmemory-jar</id>
+								<phase>package</phase>
+								<goals>
+									<goal>single</goal>
+								</goals>
+								<configuration>
+									<descriptors>
+										<descriptor>src/assembly/inmemory.xml</descriptor>
+									</descriptors>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
 	</profiles>
 
 
 	<dependencies>
-
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-core_2.10</artifactId>
 			<version>1.4.0</version>
 			<scope>provided</scope>
 		</dependency>
-		
+
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-mllib_2.10</artifactId>
 			<version>1.4.0</version>
 			<scope>provided</scope>
 		</dependency>
-		
+
 		<!-- To support dataframe in mlcontext -->
 		<dependency>
 			<groupId>org.apache.spark</groupId>
@@ -477,7 +530,7 @@
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-common</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -489,7 +542,7 @@
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-hdfs</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -501,7 +554,7 @@
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-client</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -513,7 +566,7 @@
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-mapreduce-client-app</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -525,7 +578,7 @@
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-mapreduce-client-jobclient</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -568,7 +621,6 @@
 			</exclusions>
 		</dependency>
 
-
 		<dependency>
 			<groupId>net.sf.opencsv</groupId>
 			<artifactId>opencsv</artifactId>
@@ -602,11 +654,10 @@
 			<scope>provided</scope>
 		</dependency>
 
-
 		<dependency>
 			<groupId>org.antlr</groupId>
 			<artifactId>antlr4</artifactId>
-			<version>4.3</version>
+			<version>${antlr.version}</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -618,21 +669,21 @@
 		<dependency>
 			<groupId>org.antlr</groupId>
 			<artifactId>antlr4-runtime</artifactId>
-			<version>4.3</version>
+			<version>${antlr.version}</version>
 		</dependency>
 
 		<!-- Libraries for yarn integration -->
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-yarn-api</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-yarn-common</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 			<exclusions>
 				<exclusion>
@@ -645,22 +696,17 @@
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-yarn-client</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>org.apache.hadoop</groupId>
 			<artifactId>hadoop-mapreduce-client-common</artifactId>
-			<version>2.4.1</version>
+			<version>${hadoop.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
 	</dependencies>
-
-	<properties>
-		<!-- OS-specific JVM arguments for running integration tests -->
-		<integrationTestExtraJVMArgs />
-	</properties>
 
 </project>

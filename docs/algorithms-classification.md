@@ -3,6 +3,24 @@ layout: global
 title: SystemML Algorithms Reference - Classification
 displayTitle: <a href="algorithms-reference.html">SystemML Algorithms Reference</a>
 ---
+<!--
+{% comment %}
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements.  See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to you under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+{% endcomment %}
+-->
 
 # 2. Classification
 
@@ -46,7 +64,7 @@ Prob[y_i\,{=}\,0\mid x_i; \beta] \,=\,
 
 Here category label 0
 serves as the *baseline*, and function $$\exp(\beta_0 + x_i\beta_{1:m})$$
-shows how likely we expect to see “$y_i = 1$” in comparison to the
+shows how likely we expect to see "$y_i = 1$" in comparison to the
 baseline. Like in a loaded coin, the predicted odds of seeing 1 versus 0
 are $$\exp(\beta_0 + x_i\beta_{1:m})$$ to 1, with each feature $$x_{i,j}$$
 multiplying its own factor $\exp(\beta_j x_{i,j})$ to the odds. Given a
@@ -253,7 +271,7 @@ for initial values.
 | OBJ\_DROP\_RATIO    | Actual-to-predicted reduction ratio, used to update the trust region |
 | IS\_POINT\_UPDATED  | $1 = {}$new point accepted; $0 = {}$new point rejected, old point restored |
 | GRADIENT\_NORM      | L2-norm of the loss function gradient (omitted if point is rejected) |
-| RUST\_DELTA         | Updated trust region size, the “delta” |
+| RUST\_DELTA         | Updated trust region size, the "delta" |
 
 
 * * *

@@ -5,6 +5,24 @@ author: Christian Kadner
 description: SystemML Quick Start Guide
 displayTitle: SystemML Quick Start Guide
 ---
+<!--
+{% comment %}
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements.  See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to you under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+{% endcomment %}
+-->
 
 * This will become a table of contents (this text will be scraped).
 {:toc}
@@ -40,10 +58,11 @@ algorithms can be found in the [Algorithms Reference](algorithms-reference.html)
 
 # Download SystemML
 
-Binary releases of SystemML are available for download at
+The pre-incubator binary release of SystemML 0.8.0 is available for download at
 [https://github.com/SparkTC/systemml/releases](https://github.com/SparkTC/systemml/releases).
+Apache incubator binary releases of SystemML will be available from the [Apache SystemML (incubating)](http://systemml.apache.org/) website.
 
-The SystemML project is available on GitHub at [https://github.com/SparkTC/systemml](https://github.com/SparkTC/systemml).
+The SystemML project is available on GitHub at [https://github.com/apache/incubator-systemml](https://github.com/apache/incubator-systemml).
 SystemML can be downloaded from GitHub and built with Maven. Instructions to build and
 test SystemML can be found in the GitHub README file.
 
@@ -80,7 +99,7 @@ To follow along with this guide, first build a standalone package of SystemML
 or build it from source {% endcomment %} using [Apache Maven](http://maven.apache.org)
 and unpack it to your working directory, i.e. ```~/systemml-tutorial```.
 
-    $ git clone https://github.com/SparkTC/systemml.git
+    $ git clone https://github.com/apache/incubator-systemml.git
     $ mvn clean package
     $ tar -xzf `find . -name 'system-ml*standalone.tar.gz'` -C ~/systemml-tutorial
 
@@ -207,7 +226,7 @@ univariate statistic.
 
 The following table lists the number and name of each univariate statistic. The row
 numbers below correspond to the elements of the first column in the output 
-matrix above. The signs “+” show applicability to scale or/and to categorical 
+matrix above. The signs "+" show applicability to scale or/and to categorical 
 features.
 
   | Row | Name of Statistic          | Scale | Categ. |
@@ -357,7 +376,7 @@ If you encounter a `"java.lang.OutOfMemoryError"` you can edit the invocation
 script (`runStandaloneSystemML.sh` or `runStandaloneSystemML.bat`) to increase
 the memory available to the JVM, i.e: 
 
-    java -Xmx16g -Xms4g -Xmn1g -cp ${CLASSPATH} com.ibm.bi.dml.api.DMLScript \
+    java -Xmx16g -Xms4g -Xmn1g -cp ${CLASSPATH} org.apache.sysml.api.DMLScript \
          -f ${SCRIPT_FILE} -exec singlenode -config=SystemML-config.xml \
          $@
 

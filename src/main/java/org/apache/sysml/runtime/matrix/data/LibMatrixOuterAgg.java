@@ -894,24 +894,24 @@ public class LibMatrixOuterAgg
 
 		//allocate and initialize output values (not indices) 
 		out.allocateDenseBlock(true);
-		Arrays.fill(out.getDenseArray(), 0, out.getNumColumns(), agg0);
+		Arrays.fill(out.getDenseBlock(), 0, out.getNumColumns(), agg0);
 		if(agg0 != 0.0)
 			out.setNonZeros(out.getNumColumns());
 		
 		if( in.isEmptyBlock(false) )
 			return;
 			
-		SparseRow[] aSparseRows = in.getSparseRows();		
-		for (int j = 0; j < aSparseRows.length; ++j)
-		if( aSparseRows[j]!=null && !aSparseRows[j].isEmpty() )
-		{
-			double [] aValues = aSparseRows[j].getValueContainer();
-			int [] aIndexes = aSparseRows[j].getIndexContainer();
+		SparseBlock sblock = in.getSparseBlock();		
+		for( int j = 0; j < sblock.numRows(); j++)
+		if( !sblock.isEmpty(j) ) {
+			int apos = sblock.pos(j);
+			int alen = sblock.size(j);
+			int[] aix = sblock.indexes(j);
+			double [] avals = sblock.values(j);
 			
-			for (int i=0; i < aValues.length; ++i)
-			{
-				int cnt = sumRowSumGtLeColSumLtGe(aValues[i], bv, bOp);
-				out.quickSetValue(0, aIndexes[i], cnt);
+			for (int i=apos; i < apos+alen; i++) {
+				int cnt = sumRowSumGtLeColSumLtGe(avals[i], bv, bOp);
+				out.quickSetValue(0, aix[i], cnt);
 			}
 		}		
 	}
@@ -954,24 +954,24 @@ public class LibMatrixOuterAgg
 
 		//allocate and initialize output values (not indices) 
 		out.allocateDenseBlock(true);
-		Arrays.fill(out.getDenseArray(), 0, out.getNumColumns(), agg0);
+		Arrays.fill(out.getDenseBlock(), 0, out.getNumColumns(), agg0);
 		if(agg0 != 0.0)
 			out.setNonZeros(out.getNumColumns());
 		
 		if( in.isEmptyBlock(false) )
 			return;
 			
-		SparseRow[] aSparseRows = in.getSparseRows();		
-		for (int j = 0; j < aSparseRows.length; ++j)
-		if( aSparseRows[j]!=null && !aSparseRows[j].isEmpty() )
-		{
-			double [] aValues = aSparseRows[j].getValueContainer();
-			int [] aIndexes = aSparseRows[j].getIndexContainer();
+		SparseBlock sblock = in.getSparseBlock();		
+		for (int j = 0; j < sblock.numRows(); j++)
+		if( !sblock.isEmpty(j) ) {
+			int apos = sblock.pos(j);
+			int alen = sblock.size(j);
+			int[] aix = sblock.indexes(j);
+			double [] avals = sblock.values(j);
 			
-			for (int i=0; i < aValues.length; ++i)
-			{
-				int cnt = sumRowSumLtGeColSumGtLe(aValues[i], bv, bOp);
-				out.quickSetValue(0, aIndexes[i], cnt);
+			for (int i=apos; i < apos+alen; i++) {
+				int cnt = sumRowSumLtGeColSumGtLe(avals[i], bv, bOp);
+				out.quickSetValue(0, aix[i], cnt);
 			}
 		}		
 	}
@@ -1014,24 +1014,24 @@ public class LibMatrixOuterAgg
 
 		//allocate and initialize output values (not indices) 
 		out.allocateDenseBlock(true);
-		Arrays.fill(out.getDenseArray(), 0, out.getNumColumns(), agg0);
+		Arrays.fill(out.getDenseBlock(), 0, out.getNumColumns(), agg0);
 		if(agg0 != 0.0)
 			out.setNonZeros(out.getNumColumns());
 		
 		if( in.isEmptyBlock(false) )
 			return;
 			
-		SparseRow[] aSparseRows = in.getSparseRows();		
-		for (int j = 0; j < aSparseRows.length; ++j)
-		if( aSparseRows[j]!=null && !aSparseRows[j].isEmpty() )
-		{
-			double [] aValues = aSparseRows[j].getValueContainer();
-			int [] aIndexes = aSparseRows[j].getIndexContainer();
+		SparseBlock sblock = in.getSparseBlock();		
+		for (int j = 0; j < sblock.numRows(); j++)
+		if( !sblock.isEmpty(j) ) {
+			int apos = sblock.pos(j);
+			int alen = sblock.size(j);
+			int[] aix = sblock.indexes(j);
+			double [] avals = sblock.values(j);
 			
-			for (int i=0; i < aValues.length; ++i)
-			{
-				int cnt = sumEqNe(aValues[i], bv, bOp);
-				out.quickSetValue(0, aIndexes[i], cnt);
+			for (int i=apos; i < apos+alen; ++i) {
+				int cnt = sumEqNe(avals[i], bv, bOp);
+				out.quickSetValue(0, aix[i], cnt);
 			}
 		}		
 	}
@@ -1203,8 +1203,9 @@ public class LibMatrixOuterAgg
 			return ixMax;
 		
 		int ix = Arrays.binarySearch(bv, value);
-		ix = Math.abs(ix)-1;
-		ixMax = bvi[ix-1]+1; 
+		if(ix < 0)
+			ix = Math.abs(ix)-2;
+		ixMax = bvi[ix]+1; 
 		
 		return ixMax;
 	}
@@ -1228,8 +1229,8 @@ public class LibMatrixOuterAgg
 		
 		int ix = Arrays.binarySearch(bv, value);
 		if (ix < 0) 
-			ix = Math.abs(ix)-1;
-		ixMax = bvi[ix-1]+1; 
+			ix = Math.abs(ix)-2;
+		ixMax = bvi[ix]+1; 
 		
 		return ixMax;
 	}
@@ -1247,12 +1248,13 @@ public class LibMatrixOuterAgg
 	{
 		int ixMax = bv.length;
 		
-		if(value < bv[0] || value > bv[bv.length-1]) 
+		if(value <= bv[0] || value > bv[bv.length-1]) 
 			return ixMax;
 		
 		int ix = Arrays.binarySearch(bv, value);
-		ix = Math.abs(ix);
-		ixMax = bvi[ix-1]+1; 
+		if(ix < 0)
+			ix = Math.abs(ix)-1;
+		ixMax = bvi[ix]+1; 
 		
 		return ixMax;
 	}
@@ -1363,8 +1365,8 @@ public class LibMatrixOuterAgg
 		
 		int ix = Arrays.binarySearch(bv, value);
 		if (ix < 0) 
-			ix = Math.abs(ix)-1;
-		ixMin = bvi[ix-1]+1; 
+			ix = Math.abs(ix)-2;
+		ixMin = bvi[ix]+1; 
 		
 		return ixMin;
 	}

@@ -98,8 +98,6 @@ public class ExternalFunctionProgramBlock extends FunctionProgramBlock
 	{
 		super(prog, inputParams, outputParams);		
 		_baseDir = baseDir;
-		
-		//NOTE: no need to setup nimble queue for CP external functions
 	}
 	
 	public ExternalFunctionProgramBlock(Program prog,
@@ -610,10 +608,9 @@ public class ExternalFunctionProgramBlock extends FunctionProgramBlock
 	/**
 	 * Method to execute an external function invocation instruction.
 	 * 
+	 * @param ec
 	 * @param inst
-	 * @param dQueue
-	 * @throws NimbleCheckedRuntimeException
-	 * @throws DMLRuntimeException 
+	 * @throws DMLRuntimeException
 	 */
 	@SuppressWarnings("unchecked")
 	public void executeInstruction(ExecutionContext ec, ExternalFunctionInvocationInstruction inst) 
@@ -686,10 +683,8 @@ public class ExternalFunctionProgramBlock extends FunctionProgramBlock
 			if (returnFunc.getFunctionOutput(i).getType() == FunctionParameterType.Matrix) {
 				Matrix m = (Matrix) returnFunc.getFunctionOutput(i);
 
-				if (!(tokens.get(0)
-						.compareTo(getFunctionParameterDataTypeString(FunctionParameterType.Matrix)) == 0)
-						|| !(tokens.get(2).compareTo(
-								getMatrixValueTypeString(m.getValueType())) == 0)) {
+				if (!(tokens.get(0).equals(getFunctionParameterDataTypeString(FunctionParameterType.Matrix)))
+						|| !(tokens.get(2).equals(getMatrixValueTypeString(m.getValueType())))) {
 					throw new PackageRuntimeException(
 							"Function output '"+outputs.get(i)+"' does not match with declaration.");
 				}

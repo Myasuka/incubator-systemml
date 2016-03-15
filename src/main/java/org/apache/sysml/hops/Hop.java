@@ -24,7 +24,6 @@ import java.util.HashMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
 import org.apache.sysml.api.DMLScript;
 import org.apache.sysml.api.DMLScript.RUNTIME_PLATFORM;
 import org.apache.sysml.conf.ConfigurationManager;
@@ -84,6 +83,7 @@ public abstract class Hop
 	protected long _rows_in_block = -1;
 	protected long _cols_in_block = -1;
 	protected long _nnz = -1;
+	protected boolean _updateInPlace = false;
 
 	protected ArrayList<Hop> _parent = new ArrayList<Hop>();
 	protected ArrayList<Hop> _input = new ArrayList<Hop>();
@@ -341,6 +341,7 @@ public abstract class Hop
 	 * 
 	 * @throws HopsException
 	 */
+	@SuppressWarnings("unused") //see CHECKPOINT_SPARSE_CSR
 	private void constructAndSetCheckpointLopIfRequired() 
 		throws HopsException
 	{
@@ -373,13 +374,13 @@ public abstract class Hop
 				//investigate need for serialized storage of large sparse matrices
 				//(compile- instead of runtime-level for better debugging)
 				boolean serializedStorage = false;
-				if( dimsKnown(true) ) {
+				if( dimsKnown(true) && !Checkpoint.CHECKPOINT_SPARSE_CSR ) {
 					double matrixPSize = OptimizerUtils.estimatePartitionedSizeExactSparsity(_dim1, _dim2, _rows_in_block, _cols_in_block, _nnz);
 					double dataCache = SparkExecutionContext.getConfiguredTotalDataMemory(true);
 					serializedStorage = (MatrixBlock.evalSparseFormatInMemory(_dim1, _dim2, _nnz)
 							             && matrixPSize > dataCache ); //sparse in-memory does not fit in agg mem 
 				}
-				else {
+				else if( !dimsKnown(true) ) {
 					setRequiresRecompile();
 				}
 			
@@ -841,6 +842,14 @@ public abstract class Hop
 		return _nnz;
 	}
 
+	public void setUpdateInPlace(boolean updateInPlace){
+		_updateInPlace = updateInPlace;
+	}
+	
+	public boolean getUpdateInPlace(){
+		return _updateInPlace;
+	}
+
 	public abstract Lop constructLops() 
 		throws HopsException, LopsException;
 
@@ -954,7 +963,7 @@ public abstract class Hop
 				s.append(h.getHopID() + "; ");
 			}
 			
-			s.append("\n  dims [" + _dim1 + "," + _dim2 + "] blk [" + _rows_in_block + "," + _cols_in_block + "] nnz " + _nnz);
+			s.append("\n  dims [" + _dim1 + "," + _dim2 + "] blk [" + _rows_in_block + "," + _cols_in_block + "] nnz: " + _nnz + " UpdateInPlace: " + _updateInPlace);
 			s.append("  MemEstimate = Out " + (_outputMemEstimate/1024/1024) + " MB, In&Out " + (_memEstimate/1024/1024) + " MB" );
 			LOG.debug(s.toString());
 		}
@@ -980,7 +989,7 @@ public abstract class Hop
 		throws HopsException
 	{
 		lop.getOutputParameters().setDimensions(
-			getDim1(), getDim2(), getRowsInBlock(), getColsInBlock(), getNnz());	
+			getDim1(), getDim2(), getRowsInBlock(), getColsInBlock(), getNnz(), getUpdateInPlace());	
 	}
 	
 	public Lop getLops() {
@@ -1026,7 +1035,7 @@ public abstract class Hop
 	public enum OpOp1 {
 		NOT, ABS, SIN, COS, TAN, ASIN, ACOS, ATAN, SIGN, SQRT, LOG, EXP, 
 		CAST_AS_SCALAR, CAST_AS_MATRIX, CAST_AS_DOUBLE, CAST_AS_INT, CAST_AS_BOOLEAN, 
-		PRINT, EIGEN, NROW, NCOL, LENGTH, ROUND, IQM, STOP, CEIL, FLOOR, MEDIAN, INVERSE,
+		PRINT, EIGEN, NROW, NCOL, LENGTH, ROUND, IQM, STOP, CEIL, FLOOR, MEDIAN, INVERSE, CHOLESKY,
 		//cumulative sums, products, extreme values
 		CUMSUM, CUMPROD, CUMMIN, CUMMAX,
 		//fused ML-specific operators for performance 
@@ -1064,11 +1073,11 @@ public abstract class Hop
 	
 	
 	public enum AggOp {
-		SUM, SUM_SQ, MIN, MAX, TRACE, PROD, MEAN, MAXINDEX, MININDEX
+		SUM, SUM_SQ, MIN, MAX, TRACE, PROD, MEAN, VAR, MAXINDEX, MININDEX
 	};
 
 	public enum ReOrgOp {
-		TRANSPOSE, DIAG, RESHAPE, SORT
+		TRANSPOSE, DIAG, RESHAPE, SORT, REV
 		//Note: Diag types are invalid because for unknown sizes this would 
 		//create incorrect plans (now we try to infer it for memory estimates
 		//and rewrites but the final choice is made during runtime)
@@ -1080,7 +1089,8 @@ public abstract class Hop
 	};
 
 	public enum ParamBuiltinOp {
-		INVALID, CDF, INVCDF, GROUPEDAGG, RMEMPTY, REPLACE, REXPAND, TRANSFORM
+		INVALID, CDF, INVCDF, GROUPEDAGG, RMEMPTY, REPLACE, REXPAND, 
+		TRANSFORM, TRANSFORMAPPLY
 	};
 
 	/**
@@ -1124,12 +1134,14 @@ public abstract class Hop
 		HopsAgg2Lops.put(AggOp.MININDEX, org.apache.sysml.lops.Aggregate.OperationTypes.MinIndex);
 		HopsAgg2Lops.put(AggOp.PROD, org.apache.sysml.lops.Aggregate.OperationTypes.Product);
 		HopsAgg2Lops.put(AggOp.MEAN, org.apache.sysml.lops.Aggregate.OperationTypes.Mean);
+		HopsAgg2Lops.put(AggOp.VAR, org.apache.sysml.lops.Aggregate.OperationTypes.Var);
 	}
 
 	protected static final HashMap<ReOrgOp, org.apache.sysml.lops.Transform.OperationTypes> HopsTransf2Lops;
 	static {
 		HopsTransf2Lops = new HashMap<ReOrgOp, org.apache.sysml.lops.Transform.OperationTypes>();
 		HopsTransf2Lops.put(ReOrgOp.TRANSPOSE, org.apache.sysml.lops.Transform.OperationTypes.Transpose);
+		HopsTransf2Lops.put(ReOrgOp.REV, org.apache.sysml.lops.Transform.OperationTypes.Rev);
 		HopsTransf2Lops.put(ReOrgOp.DIAG, org.apache.sysml.lops.Transform.OperationTypes.Diag);
 		HopsTransf2Lops.put(ReOrgOp.RESHAPE, org.apache.sysml.lops.Transform.OperationTypes.Reshape);
 		HopsTransf2Lops.put(ReOrgOp.SORT, org.apache.sysml.lops.Transform.OperationTypes.Sort);
@@ -1243,6 +1255,7 @@ public abstract class Hop
 		HopsOpOp1LopsU.put(OpOp1.CUMMIN, org.apache.sysml.lops.Unary.OperationTypes.CUMMIN);
 		HopsOpOp1LopsU.put(OpOp1.CUMMAX, org.apache.sysml.lops.Unary.OperationTypes.CUMMAX);
 		HopsOpOp1LopsU.put(OpOp1.INVERSE, org.apache.sysml.lops.Unary.OperationTypes.INVERSE);
+		HopsOpOp1LopsU.put(OpOp1.CHOLESKY, org.apache.sysml.lops.Unary.OperationTypes.CHOLESKY);
 		HopsOpOp1LopsU.put(OpOp1.CAST_AS_SCALAR, org.apache.sysml.lops.Unary.OperationTypes.NOTSUPPORTED);
 		HopsOpOp1LopsU.put(OpOp1.CAST_AS_MATRIX, org.apache.sysml.lops.Unary.OperationTypes.NOTSUPPORTED);
 		HopsOpOp1LopsU.put(OpOp1.SPROP, org.apache.sysml.lops.Unary.OperationTypes.SPROP);
@@ -1318,6 +1331,7 @@ public abstract class Hop
 		HopsParameterizedBuiltinLops.put(ParamBuiltinOp.REPLACE, org.apache.sysml.lops.ParameterizedBuiltin.OperationTypes.REPLACE);
 		HopsParameterizedBuiltinLops.put(ParamBuiltinOp.REXPAND, org.apache.sysml.lops.ParameterizedBuiltin.OperationTypes.REXPAND);
 		HopsParameterizedBuiltinLops.put(ParamBuiltinOp.TRANSFORM, org.apache.sysml.lops.ParameterizedBuiltin.OperationTypes.TRANSFORM);
+		HopsParameterizedBuiltinLops.put(ParamBuiltinOp.TRANSFORMAPPLY, org.apache.sysml.lops.ParameterizedBuiltin.OperationTypes.TRANSFORMAPPLY);		
 	}
 
 	protected static final HashMap<Hop.OpOp2, String> HopsOpOp2String;
@@ -1401,6 +1415,7 @@ public abstract class Hop
 		HopsAgg2String.put(AggOp.MININDEX, "minindex");
 		HopsAgg2String.put(AggOp.TRACE, "trace");
 		HopsAgg2String.put(AggOp.MEAN, "mean");
+		HopsAgg2String.put(AggOp.VAR, "var");
 	}
 
 	protected static final HashMap<Hop.ReOrgOp, String> HopsTransf2String;
@@ -1816,6 +1831,7 @@ public abstract class Hop
 		_rows_in_block = that._rows_in_block;
 		_cols_in_block = that._cols_in_block;
 		_nnz = that._nnz;
+		_updateInPlace = that._updateInPlace;
 
 		//no copy of lops (regenerated)
 		_parent = new ArrayList<Hop>();

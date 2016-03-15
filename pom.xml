@@ -25,11 +25,11 @@
 		<version>17</version>
 	</parent>
 	<groupId>org.apache.systemml</groupId>
-	<version>0.9.0-SNAPSHOT</version>
-	<artifactId>system-ml</artifactId>
+	<version>0.10.0-incubating-SNAPSHOT</version>
+	<artifactId>systemml</artifactId>
 	<packaging>jar</packaging>
 	<name>SystemML</name>
-	<description>Declarative machine learning</description>
+	<description>Declarative Machine Learning</description>
 	<url>http://systemml.apache.org/</url>
 	<licenses>
 		<license>
@@ -40,7 +40,7 @@
 	<scm>
 		<connection>scm:git:git@github.com:apache/incubator-systemml</connection>
 		<developerConnection>scm:git:https://git-wip-us.apache.org/repos/asf/incubator-systemml</developerConnection>
-		<url>scm:git:git@github.com:apache/incubator-systemml</url>
+		<url>https://git-wip-us.apache.org/repos/asf?p=incubator-systemml.git</url>
 		<tag>HEAD</tag>
 	</scm>
 	<issueManagement>
@@ -65,6 +65,7 @@
 	<properties>
 		<hadoop.version>2.4.1</hadoop.version>
 		<antlr.version>4.3</antlr.version>
+		<spark.version>1.4.1</spark.version>
 
 		<!-- OS-specific JVM arguments for running integration tests -->
 		<integrationTestExtraJVMArgs />
@@ -328,6 +329,7 @@
 					<includes>
 						<include>**/integration/applications/**/*Suite.java</include>
 						<include>**/integration/functions/gdfo/*Suite.java</include>
+						<include>**/integration/functions/sparse/*Suite.java</include>
 						<include>**/integration/functions/**/*Test*.java</include>
 						<include>**/integration/scalability/**/*Test.java</include>
 					</includes>
@@ -365,6 +367,51 @@
 						</pluginExecutions>
 					</lifecycleMappingMetadata>
 				</configuration>
+			</plugin>
+
+			<plugin>
+				<artifactId>maven-clean-plugin</artifactId>
+				<version>3.0.0</version>
+				<executions>
+					<execution>
+						<id>clean-original-jar</id>
+						<phase>package</phase>
+						<goals>
+							<goal>clean</goal>
+						</goals>
+						<configuration>
+							<excludeDefaultDirectories>true</excludeDefaultDirectories>
+							<filesets>
+								<fileset>
+									<directory>${project.build.directory}</directory>
+									<includes>
+										<include>original-*.jar</include>
+									</includes>
+								</fileset>
+							</filesets>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-antrun-plugin</artifactId>
+				<version>1.8</version>
+				<executions>
+					<execution>
+						<id>copy</id>
+						<phase>package</phase>
+						<configuration>
+							<target name="copy and rename JAR">
+								<copy file="${project.build.directory}/${project.artifactId}-${project.version}.jar" tofile="${project.build.directory}/SystemML.jar" />
+							</target>
+						</configuration>
+						<goals>
+							<goal>run</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 
 		</plugins>
@@ -415,17 +462,57 @@
 								<exclude>.classpath</exclude>
 								<exclude>.project</exclude>
 								<exclude>docs</exclude>
+								<exclude>**/docs/**</exclude>
 								<exclude>**/*.csv</exclude>
 								<exclude>**/*.json</exclude>
 								<exclude>**/*.mtx</exclude>
 								<exclude>**/*.mtd</exclude>
 								<exclude>**/target/**</exclude>
 								<exclude>**/README.md</exclude>
+								<!-- Generated antlr files -->
+								<exclude>src/main/java/Dml.tokens</exclude>
+								<exclude>src/main/java/DmlLexer.tokens</exclude>
+								<exclude>src/main/java/Pydml.tokens</exclude>
+								<exclude>src/main/java/PydmlLexer.tokens</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/dml/DmlBaseListener.java</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/dml/DmlLexer.java</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/dml/DmlListener.java</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/dml/DmlParser.java</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/pydml/PydmlBaseListener.java</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/pydml/PydmlLexer.java</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/pydml/PydmlListener.java</exclude>
+								<exclude>src/main/java/org/apache/sysml/parser/pydml/PydmlParser.java</exclude>
+								<!-- Test Validation files -->
+								<exclude>src/test/scripts/functions/external/kMeans/kMeansWrapperOutput</exclude>
+								<exclude>src/test/scripts/functions/external/kMeans2/kMeansWrapperOutput1</exclude>
+								<exclude>src/test/scripts/functions/external/kMeans2/kMeansWrapperOutput2</exclude>
+								<exclude>src/test/scripts/functions/external/seqMiner/FreqSeqFile</exclude>
+								<exclude>src/test/scripts/functions/external/seqMiner/FreqSeqSupportFile</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_1.data</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_1.data.single</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_2.data/part-0</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_2.data/part-1</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_2.data.single</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_3.data/part-0</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_3.data/part-1</exclude>
+								<exclude>src/test/scripts/functions/io/csv/in/transfusion_3.data.single</exclude>
+								<exclude>src/test/scripts/functions/transform/input/homes/homesNAN.csv.colnames</exclude>
 							</excludes>
 						</configuration>
 					</plugin>
 				</plugins>
 			</build>
+		</profile>
+
+		<profile>
+			<!-- Need to ignore doclint warnings for javadocs generated on Java 8 until warnings are fixed -->
+			<id>ignore-doclint-warnings-for-javadocs-on-java-8</id>
+			<activation>
+				<jdk>[1.8,)</jdk>
+			</activation>
+			<properties>
+				<javadoc.opts>-Xdoclint:none</javadoc.opts>
+			</properties>
 		</profile>
 
 		<profile>
@@ -437,6 +524,9 @@
 					<plugin>
 						<artifactId>maven-assembly-plugin</artifactId>
 						<version>2.4</version><!--$NO-MVN-MAN-VER$-->
+						<configuration>
+							<tarLongFileMode>gnu</tarLongFileMode>
+						</configuration>
 						<executions>
 							<execution>
 								<id>create-source-distribution-assembly</id>
@@ -452,7 +542,7 @@
 							</execution>
 
 							<execution>
-								<id>create-cluster-binary-distribution-assembly</id>
+								<id>create-binary-cluster-distribution-assembly</id>
 								<phase>package</phase>
 								<goals>
 									<goal>single</goal>
@@ -461,11 +551,31 @@
 									<descriptors>
 										<descriptor>src/assembly/distrib.xml</descriptor>
 									</descriptors>
+									<appendAssemblyId>false</appendAssemblyId>
 								</configuration>
 							</execution>
 
 							<execution>
-								<id>create-standalone-assembly</id>
+								<id>create-standalone-jar</id>
+								<phase>package</phase>
+								<goals>
+									<goal>single</goal>
+								</goals>
+								<configuration>
+									<descriptors>
+										<descriptor>src/assembly/standalone-jar.xml</descriptor>
+									</descriptors>
+									<archive>
+										<index>true</index>
+										<manifest>
+											<mainClass>org.apache.sysml.api.DMLScript</mainClass>
+										</manifest>
+									</archive>
+								</configuration>
+							</execution>
+
+							<execution>
+								<id>create-binary-standalone-distribution-assembly</id>
 								<phase>package</phase>
 								<goals>
 									<goal>single</goal>
@@ -477,7 +587,7 @@
 								</configuration>
 							</execution>
 
-							<execution>
+							<!--execution>
 								<id>create-inmemory-jar</id>
 								<phase>package</phase>
 								<goals>
@@ -488,6 +598,73 @@
 										<descriptor>src/assembly/inmemory.xml</descriptor>
 									</descriptors>
 								</configuration>
+							</execution-->
+						</executions>
+					</plugin>
+
+					<plugin>
+						<artifactId>maven-deploy-plugin</artifactId>
+						<version>2.8.2</version>
+						<configuration>
+							<updateReleaseInfo>true</updateReleaseInfo>
+						</configuration>
+						<executions>
+							<execution>
+								<goals>
+									<goal>deploy</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+
+					<plugin>
+						<artifactId>maven-gpg-plugin</artifactId>
+						<version>1.6</version>
+						<executions>
+							<execution>
+								<phase>verify</phase>
+								<goals>
+									<goal>sign</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-source-plugin</artifactId>
+						<version>2.4</version>
+						<executions>
+							<execution>
+								<id>attach-sources</id>
+								<goals>
+									<goal>jar-no-fork</goal>
+								</goals>
+							</execution>
+						</executions>
+					</plugin>
+
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-javadoc-plugin</artifactId>
+						<version>2.10.3</version>
+						<configuration>
+							<!-- Need to include the following packages, so exclude others:
+								org.apache.sysml.api
+								org.apache.sysml.runtime.instructions.spark.utils (for RDDConverterUtils, etc)
+								org.apache.sysml.runtime.matrix (for MatrixCharacteristics, etc)
+								org.apache.sysml.runtime.matrix.data (for MatrixIndexes, MatrixBlock, etc)
+								org.apache.sysml.udf
+							-->
+							<excludePackageNames>org.apache.sysml.conf:org.apache.sysml.debug:org.apache.sysml.hops:org.apache.sysml.lops:org.apache.sysml.parser:org.apache.sysml.runtime.controlprogram:org.apache.sysml.runtime.functionobjects:org.apache.sysml.runtime.instructions.cp:org.apache.sysml.runtime.instructions.cpfile:org.apache.sysml.runtime.instructions.mr:org.apache.sysml.runtime.instructions.spark.data:org.apache.sysml.runtime.instructions.spark.functions:org.apache.sysml.runtime.io:org.apache.sysml.runtime.matrix.data.hadoopfix:org.apache.sysml.runtime.matrix.mapred:org.apache.sysml.runtime.matrix.operators:org.apache.sysml.runtime.matrix.sort:org.apache.sysml.runtime.transform:org.apache.sysml.runtime.util:org.apache.sysml.utils:org.apache.sysml.yarn</excludePackageNames>
+							<additionalparam>${javadoc.opts}</additionalparam>
+						</configuration>
+						<executions>
+							<execution>
+								<id>attach-javadocs</id>
+								<goals>
+									<goal>jar</goal>
+								</goals>
 							</execution>
 						</executions>
 					</plugin>
@@ -501,14 +678,14 @@
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-core_2.10</artifactId>
-			<version>1.4.0</version>
+			<version>${spark.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-mllib_2.10</artifactId>
-			<version>1.4.0</version>
+			<version>${spark.version}</version>
 			<scope>provided</scope>
 		</dependency>
 
@@ -516,7 +693,7 @@
 		<dependency>
 			<groupId>org.apache.spark</groupId>
 			<artifactId>spark-sql_2.10</artifactId>
-			<version>1.3.1</version>
+			<version>${spark.version}</version>
 			<scope>provided</scope>
 		</dependency>
 

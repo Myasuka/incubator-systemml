@@ -92,6 +92,9 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( "uamean"  , SPINSTRUCTION_TYPE.AggregateUnary);
 		String2SPInstructionType.put( "uarmean" , SPINSTRUCTION_TYPE.AggregateUnary);
 		String2SPInstructionType.put( "uacmean" , SPINSTRUCTION_TYPE.AggregateUnary);
+		String2SPInstructionType.put( "uavar"   , SPINSTRUCTION_TYPE.AggregateUnary);
+		String2SPInstructionType.put( "uarvar"  , SPINSTRUCTION_TYPE.AggregateUnary);
+		String2SPInstructionType.put( "uacvar"  , SPINSTRUCTION_TYPE.AggregateUnary);
 		String2SPInstructionType.put( "uamax"   , SPINSTRUCTION_TYPE.AggregateUnary);
 		String2SPInstructionType.put( "uarmax"  , SPINSTRUCTION_TYPE.AggregateUnary);
 		String2SPInstructionType.put( "uarimax",  SPINSTRUCTION_TYPE.AggregateUnary);
@@ -130,6 +133,7 @@ public class SPInstructionParser extends InstructionParser
 		
 		// Reorg Instruction Opcodes (repositioning of existing values)
 		String2SPInstructionType.put( "r'"   	   , SPINSTRUCTION_TYPE.Reorg);
+		String2SPInstructionType.put( "rev"   	   , SPINSTRUCTION_TYPE.Reorg);
 		String2SPInstructionType.put( "rdiag"      , SPINSTRUCTION_TYPE.Reorg);
 		String2SPInstructionType.put( "rshape"     , SPINSTRUCTION_TYPE.MatrixReshape);
 		String2SPInstructionType.put( "rsort"      , SPINSTRUCTION_TYPE.Reorg);

@@ -265,8 +265,8 @@ public class InfrastructureAnalyzer
 		// Due to a bug in HDP related to fetching the "mode" of execution within mappers,
 		// we explicitly probe the relevant properties instead of relying on results from 
 		// analyzeHadoopCluster().
-		String jobTracker = job.get("mapred.job.tracker", "local");
-		String framework = job.get("mapreduce.framework.name", "local");
+		String jobTracker = job.get(MRConfigurationNames.MR_JOBTRACKER_ADDRESS, "local");
+		String framework = job.get(MRConfigurationNames.MR_FRAMEWORK_NAME, "local");
 		boolean isYarnEnabled = (framework!=null && framework.equals("yarn"));
 		
 		return ("local".equals(jobTracker) & !isYarnEnabled);
@@ -509,13 +509,13 @@ public class InfrastructureAnalyzer
 	{
 		JobConf job = ConfigurationManager.getCachedJobConf();
 		
-		_remoteMRSortMem = (1024*1024) * job.getLong("io.sort.mb",100); //1MB
+		_remoteMRSortMem = (1024*1024) * job.getLong(MRConfigurationNames.MR_TASK_IO_SORT_MB,100); //1MB
 			
 		//handle jvm max mem (map mem budget is relevant for map-side distcache and parfor)
 		//(for robustness we probe both: child and map configuration parameters)
-		String javaOpts1 = job.get("mapred.child.java.opts"); //internally mapred/mapreduce synonym
-		String javaOpts2 = job.get("mapreduce.map.java.opts", null); //internally mapred/mapreduce synonym
-		String javaOpts3 = job.get("mapreduce.reduce.java.opts", null); //internally mapred/mapreduce synonym
+		String javaOpts1 = job.get(MRConfigurationNames.MR_CHILD_JAVA_OPTS); //internally mapred/mapreduce synonym
+		String javaOpts2 = job.get(MRConfigurationNames.MR_MAP_JAVA_OPTS, null); //internally mapred/mapreduce synonym
+		String javaOpts3 = job.get(MRConfigurationNames.MR_REDUCE_JAVA_OPTS, null); //internally mapred/mapreduce synonym
 		if( javaOpts2 != null ) //specific value overrides generic
 			_remoteJVMMaxMemMap = extractMaxMemoryOpt(javaOpts2); 
 		else
@@ -526,11 +526,11 @@ public class InfrastructureAnalyzer
 			_remoteJVMMaxMemReduce = extractMaxMemoryOpt(javaOpts1);
 		
 		//HDFS blocksize
-		String blocksize = job.get(MRConfigurationNames.DFS_BLOCK_SIZE, "134217728");
+		String blocksize = job.get(MRConfigurationNames.DFS_BLOCKSIZE, "134217728");
 		_blocksize = Long.parseLong(blocksize);
 		
 		//is yarn enabled
-		String framework = job.get("mapreduce.framework.name");
+		String framework = job.get(MRConfigurationNames.MR_FRAMEWORK_NAME);
 		_yarnEnabled = (framework!=null && framework.equals("yarn"));
 		
 		//analyze if local mode (internally requires yarn_enabled)
@@ -546,7 +546,7 @@ public class InfrastructureAnalyzer
 	{
 		//analyze if local mode (if yarn enabled, we always assume cluster mode
 		//in order to workaround configuration issues on >=Hadoop 2.6)
-		String jobTracker = job.get("mapred.job.tracker", "local");
+		String jobTracker = job.get(MRConfigurationNames.MR_JOBTRACKER_ADDRESS, "local");
 		return "local".equals(jobTracker)
 			   & !isYarnEnabled();
 	}

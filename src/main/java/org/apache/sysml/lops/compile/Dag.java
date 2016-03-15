@@ -1013,7 +1013,7 @@ public class Dag<N extends Lop>
 						if ( dnode.isTransient() 
 								&& input.getExecLocation() == ExecLocation.Data 
 								&& ((Data)input).isTransient() 
-								&& dnode.getOutputParameters().getLabel().compareTo(input.getOutputParameters().getLabel()) == 0 ) {
+								&& dnode.getOutputParameters().getLabel().equals(input.getOutputParameters().getLabel()) ) {
 							// do nothing, <code>node</code> must not processed any further.
 							;
 						}
@@ -2281,7 +2281,7 @@ public class Dag<N extends Lop>
 				// TODO: ideally, this should be done by having a member variable in Lop 
 				//       which stores the outputInfo.   
 				try {
-					oparams.setDimensions(oparams.getNumRows(), oparams.getNumCols(), -1, -1, oparams.getNnz());
+					oparams.setDimensions(oparams.getNumRows(), oparams.getNumCols(), -1, -1, oparams.getNnz(), oparams.getUpdateInPlace());
 				} catch(HopsException e) {
 					throw new LopsException(node.printErrorLocation() + "error in getOutputInfo in Dag ", e);
 				}
@@ -2399,7 +2399,7 @@ public class Dag<N extends Lop>
 							oparams.getFile_name(), 
 							true, 
 							OutputInfo.outputInfoToString(OutputInfo.CSVOutputInfo),
-							new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), -1, -1, oparams.getNnz()), 
+							new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), -1, -1, oparams.getNnz()), oparams.getUpdateInPlace(), 
 							false, delimLop.getStringValue(), true
 						);
 					
@@ -2439,7 +2439,8 @@ public class Dag<N extends Lop>
 											oparams.getFile_name(), 
 											true, 
 											OutputInfo.outputInfoToString(getOutputInfo(node, false)),
-											new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz())
+											new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz()),
+											oparams.getUpdateInPlace()
 										);
 				
 				createvarInst.setLocation(node);
@@ -2470,7 +2471,8 @@ public class Dag<N extends Lop>
 								getFilePath() + fnOutParams.getLabel(), 
 								true, 
 								OutputInfo.outputInfoToString(getOutputInfo((N)fnOut, false)),
-								new MatrixCharacteristics(fnOutParams.getNumRows(), fnOutParams.getNumCols(), (int)fnOutParams.getRowsInBlock(), (int)fnOutParams.getColsInBlock(), fnOutParams.getNnz())
+								new MatrixCharacteristics(fnOutParams.getNumRows(), fnOutParams.getNumCols(), (int)fnOutParams.getRowsInBlock(), (int)fnOutParams.getColsInBlock(), fnOutParams.getNnz()),
+								oparams.getUpdateInPlace()
 							);
 						
 						if (node._beginLine != 0)
@@ -2585,7 +2587,8 @@ public class Dag<N extends Lop>
 													tempFileName, 
 													true, 
 													OutputInfo.outputInfoToString(out.getOutInfo()), 
-													new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz())
+													new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz()),
+													oparams.getUpdateInPlace()
 												);
 						
 						createvarInst.setLocation(node);
@@ -2694,7 +2697,8 @@ public class Dag<N extends Lop>
 													tempFileName, 
 													false, 
 													OutputInfo.outputInfoToString(getOutputInfo(node, false)), 
-													new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz())
+													new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz()),
+													oparams.getUpdateInPlace()
 												);
 
 							//NOTE: no instruction patching because final write from cp instruction
@@ -2721,7 +2725,8 @@ public class Dag<N extends Lop>
 									                fnameStr, 
 									                false, 
 									                OutputInfo.outputInfoToString(getOutputInfo(node, false)), 
-									                new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz())
+									                new MatrixCharacteristics(oparams.getNumRows(), oparams.getNumCols(), rpb, cpb, oparams.getNnz()),
+													oparams.getUpdateInPlace()
 								                 );
 							// remove the variable
 							CPInstruction currInstr = CPInstructionParser.parseSingleInstruction(
@@ -2862,8 +2867,8 @@ public class Dag<N extends Lop>
 					// no computation, just a copy
 					if (rnode.getInputs().get(0).getExecLocation() == ExecLocation.Data
 							&& ((Data) rnode.getInputs().get(0)).isTransient()
-							&& rnode.getOutputParameters().getLabel().compareTo(
-								rnode.getInputs().get(0).getOutputParameters().getLabel()) == 0) 
+							&& rnode.getOutputParameters().getLabel().equals(
+								rnode.getInputs().get(0).getOutputParameters().getLabel())) 
 					{
 						markedNodes.add(rnode);
 					}

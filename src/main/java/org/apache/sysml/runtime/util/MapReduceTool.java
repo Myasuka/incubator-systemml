@@ -38,7 +38,6 @@ import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.mapred.JobConf;
-
 import org.apache.sysml.conf.ConfigurationManager;
 import org.apache.sysml.parser.DataExpression;
 import org.apache.sysml.parser.Expression.ValueType;
@@ -52,7 +51,9 @@ import org.apache.sysml.runtime.matrix.data.InputInfo;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
 import org.apache.sysml.runtime.matrix.data.NumItemsByEachReducerMetaData;
 import org.apache.sysml.runtime.matrix.data.OutputInfo;
+import org.apache.sysml.runtime.matrix.mapred.MRConfigurationNames;
 import org.apache.sysml.runtime.matrix.sort.ReadWithZeros;
+import org.apache.wink.json4j.OrderedJSONObject;
 
 
 public class MapReduceTool 
@@ -67,10 +68,10 @@ public class MapReduceTool
 	
 	public static String getUniqueKeyPerTask(JobConf job, boolean inMapper) {
 		//TODO: investigate ID pattern, required for parallel jobs
-		/*String nodePrefix = job.get("mapred.task.id");
+		/*String nodePrefix = job.get(MRConfigurationNames.MR_TASK_ATTEMPT_ID);
 		return String.valueOf(IDHandler.extractLongID(nodePrefix));*/
 		
-		String nodePrefix = job.get("mapred.task.id");
+		String nodePrefix = job.get(MRConfigurationNames.MR_TASK_ATTEMPT_ID);
 		int i;
 		if (inMapper)
 			i = nodePrefix.indexOf("_m_");
@@ -84,7 +85,7 @@ public class MapReduceTool
 	
 	@Deprecated
 	public static String getUniqueKeyPerTaskWithLeadingZros(JobConf job, boolean inMapper) {
-		String nodePrefix = job.get("mapred.task.id");
+		String nodePrefix = job.get(MRConfigurationNames.MR_TASK_ATTEMPT_ID);
 		int i;
 		if (inMapper)
 			i = nodePrefix.indexOf("_m_");
@@ -98,10 +99,10 @@ public class MapReduceTool
 	
 	public static int getUniqueTaskId(JobConf job) {
 		//TODO: investigate ID pattern, required for parallel jobs
-		/*String nodePrefix = job.get("mapred.task.id"); 
+		/*String nodePrefix = job.get(MRConfigurationNames.MR_TASK_ATTEMPT_ID); 
 		return IDHandler.extractIntID(nodePrefix);*/
 		
-		String nodePrefix = job.get("mapred.task.id");
+		String nodePrefix = job.get(MRConfigurationNames.MR_TASK_ATTEMPT_ID);
 		int j = nodePrefix.lastIndexOf("_");
 		int i=nodePrefix.lastIndexOf("_", j-1);
 		nodePrefix = nodePrefix.substring(i+1, j);
@@ -110,7 +111,7 @@ public class MapReduceTool
 	}
 
 	public static String getGloballyUniqueName(JobConf job) {
-		return job.get("mapred.task.id");
+		return job.get(MRConfigurationNames.MR_TASK_ATTEMPT_ID);
 	}
 
 	public static boolean existsFileOnHDFS(String fname){
@@ -439,123 +440,109 @@ public class MapReduceTool
 	public static void writeMetaDataFile ( String mtdfile, ValueType v, MatrixCharacteristics mc, OutputInfo outinfo) throws IOException {
 		writeMetaDataFile(mtdfile, v, mc, outinfo, null);
 	}
-	
-	public static void writeMetaDataFile( String mtdfile, ValueType v, MatrixCharacteristics mc, OutputInfo outinfo, FileFormatProperties formatProperties ) 
-		throws IOException 
-	{
-		Path pt = new Path(mtdfile);
-        FileSystem fs = FileSystem.get(_rJob);
-        BufferedWriter br = new BufferedWriter(new OutputStreamWriter(fs.create(pt,true)));		
-        formatProperties = (formatProperties==null && outinfo==OutputInfo.CSVOutputInfo) ? 
-        		           new CSVFileFormatProperties() : formatProperties;
 
-        String line = "";
-        
-        try {
-          line += "{ \n" +
-          "    \"" +  DataExpression.DATATYPEPARAM         +  "\": \"matrix\"\n" +
-          "    ,\"" +  DataExpression.VALUETYPEPARAM        +  "\": ";
-        
-          switch (v) {
-	          case DOUBLE:
-				line += "\"double\"\n";
-				break;
-		  	  case INT:
-				line += "\"int\"\n";
-				break;
-			  case BOOLEAN:
-				line += "\"boolean\"\n";
-				break;
-			  case STRING:
-				line += "\"string\"\n";
-				break;
-			  case UNKNOWN:
-				line += "\"unknown\"\n";
-				break;		
-			  case OBJECT:
-				line += "\"object\"\n"; 
-				break;
-          };
-        
-          line += 
-          "    ,\"" +  DataExpression.READROWPARAM 			+  "\": " + mc.getRows() + "\n" + 
-		  "    ,\"" + DataExpression.READCOLPARAM 			+  "\": " + mc.getCols() + "\n";
-          // only output rows_in_block and cols_in_block for binary format 
-          if ( outinfo == OutputInfo.BinaryBlockOutputInfo)  {
-         	 line += "    ,\"" + DataExpression.ROWBLOCKCOUNTPARAM	+  "\": " + mc.getRowsPerBlock() + "\n" + 
-		            "    ,\"" + DataExpression.COLUMNBLOCKCOUNTPARAM +  "\": " + mc.getColsPerBlock() + "\n";
-          }
-        
-          line += "    ,\"" +	DataExpression.READNUMNONZEROPARAM	+  "\": " + mc.getNonZeros() + "\n" +
-		          "    ,\"" + DataExpression.FORMAT_TYPE	+  "\": "; 
-        
-          if ( outinfo == OutputInfo.TextCellOutputInfo ) {
-        	line += "\"text\"\n";
-          } else if (outinfo == OutputInfo.BinaryBlockOutputInfo || outinfo == OutputInfo.BinaryCellOutputInfo ) {
-        	line += "\"binary\"\n"; // currently, there is no way to differentiate between them
-          } else if (outinfo == OutputInfo.CSVOutputInfo ) {
-        	line += "\"csv\"\n"; 
-          } else {
-        	line += "\"specialized\"\n"; 
-          }
-          
-          if ( outinfo == OutputInfo.CSVOutputInfo) {
-        	  CSVFileFormatProperties csvProperties = (CSVFileFormatProperties) formatProperties;
-              line += "    ,\"" +  DataExpression.DELIM_HAS_HEADER_ROW 	+  "\": " + csvProperties.hasHeader() + "\n";
-              line += "    ,\"" +  DataExpression.DELIM_DELIMITER 	+  "\": \"" + csvProperties.getDelim() + "\"\n";
-          }
-        
-		line += "    ,\"description\": { \"author\": \"SystemML\" } \n" + "}" ;
-        
-        br.write(line);
-        
-        br.close(); 
-        }catch (Exception e) {
-			throw new IOException(e);
+	public static void writeMetaDataFile(String mtdfile, ValueType v, MatrixCharacteristics mc, OutputInfo outinfo,
+	                                     FileFormatProperties formatProperties) throws IOException {
+		Path pt = new Path(mtdfile);
+		FileSystem fs = FileSystem.get(_rJob);
+		BufferedWriter br = new BufferedWriter(new OutputStreamWriter(fs.create(pt,true)));
+		formatProperties = (formatProperties==null && outinfo==OutputInfo.CSVOutputInfo) ?
+				new CSVFileFormatProperties() : formatProperties;
+		OrderedJSONObject mtd = new OrderedJSONObject(); // maintain order in output file
+
+		try {
+			// build JSON metadata object
+			mtd.put(DataExpression.DATATYPEPARAM, "matrix");
+			switch (v) {
+				case DOUBLE:
+					mtd.put(DataExpression.VALUETYPEPARAM, "double");
+					break;
+				case INT:
+					mtd.put(DataExpression.VALUETYPEPARAM, "int");
+					break;
+				case BOOLEAN:
+					mtd.put(DataExpression.VALUETYPEPARAM, "boolean");
+					break;
+				case STRING:
+					mtd.put(DataExpression.VALUETYPEPARAM, "string");
+					break;
+				case UNKNOWN:
+					mtd.put(DataExpression.VALUETYPEPARAM, "unknown");
+					break;
+				case OBJECT:
+					mtd.put(DataExpression.VALUETYPEPARAM, "object");
+					break;
+			}
+			mtd.put(DataExpression.READROWPARAM, mc.getRows());
+			mtd.put(DataExpression.READCOLPARAM, mc.getCols());
+			// only output rows_in_block and cols_in_block for binary format
+			if (outinfo == OutputInfo.BinaryBlockOutputInfo) {
+				mtd.put(DataExpression.ROWBLOCKCOUNTPARAM, mc.getRowsPerBlock());
+				mtd.put(DataExpression.COLUMNBLOCKCOUNTPARAM, mc.getColsPerBlock());
+			}
+			mtd.put(DataExpression.READNUMNONZEROPARAM, mc.getNonZeros());
+			if (outinfo == OutputInfo.TextCellOutputInfo) {
+				mtd.put(DataExpression.FORMAT_TYPE, "text");
+			} else if (outinfo == OutputInfo.BinaryBlockOutputInfo || outinfo == OutputInfo.BinaryCellOutputInfo ) {
+				mtd.put(DataExpression.FORMAT_TYPE, "binary");
+			} else if (outinfo == OutputInfo.CSVOutputInfo) {
+				mtd.put(DataExpression.FORMAT_TYPE, "csv");
+			} else {
+				mtd.put(DataExpression.FORMAT_TYPE, "specialized");
+			}
+			if (outinfo == OutputInfo.CSVOutputInfo) {
+				CSVFileFormatProperties csvProperties = (CSVFileFormatProperties) formatProperties;
+				mtd.put(DataExpression.DELIM_HAS_HEADER_ROW, csvProperties.hasHeader());
+				mtd.put(DataExpression.DELIM_DELIMITER, csvProperties.getDelim());
+			}
+			mtd.put(DataExpression.DESCRIPTIONPARAM,
+					new OrderedJSONObject().put(DataExpression.AUTHORPARAM, "SystemML"));
+
+			// write metadata JSON object to file
+			mtd.write(br, 4); // indent with 4 spaces
+			br.close();
+		} catch (Exception e) {
+			throw new IOException("Error creating and writing metadata JSON file", e);
 		}
 	}
-	
-	
-	public static void writeScalarMetaDataFile ( String mtdfile, ValueType v ) throws IOException {
-		
-        Path pt=new Path(mtdfile);
-        FileSystem fs = FileSystem.get(_rJob);
-        BufferedWriter br=new BufferedWriter(new OutputStreamWriter(fs.create(pt,true)));		
-		
-        try {
-          String line = "";
-          line += "{ \n" +
-                  "    \"" +  DataExpression.DATATYPEPARAM         +  "\": \"scalar\"\n" +
-        		  "    ,\"" +  DataExpression.VALUETYPEPARAM        +  "\": ";
-        		        
-          switch (v) {
-        	case DOUBLE:
-        		line += "\"double\"\n";
-        		break;
-        	case INT:
-        		line += "\"int\"\n";
-        		break;
-        	case BOOLEAN:
-        		line += "\"boolean\"\n";
-        		break;
-        	case STRING:
-        		line += "\"string\"\n";
-        		break;
-        	case UNKNOWN:
-        		line += "\"unknown\"\n";
-        		break;
-        	case OBJECT:
-        		throw new IOException("Write of generic object types not supported.");
-          };
-          
-          line += "    ,\"" + DataExpression.FORMAT_TYPE	+  "\": \"text\"\n" + 
-                  "    ,\"description\": { \"author\": \"SystemML\" } \n" +" }" ;
-        
-        br.write(line);
-        
-        br.close();
-        }catch (Exception e) {
-			throw new IOException(e);
+
+	public static void writeScalarMetaDataFile(String mtdfile, ValueType v) throws IOException {
+		Path pt=new Path(mtdfile);
+		FileSystem fs = FileSystem.get(_rJob);
+		BufferedWriter br=new BufferedWriter(new OutputStreamWriter(fs.create(pt,true)));
+		OrderedJSONObject mtd = new OrderedJSONObject(); // maintain order in output file
+
+		try {
+			// build JSON metadata object
+			mtd.put(DataExpression.DATATYPEPARAM, "scalar");
+			switch (v) {
+				case DOUBLE:
+					mtd.put(DataExpression.VALUETYPEPARAM, "double");
+					break;
+				case INT:
+					mtd.put(DataExpression.VALUETYPEPARAM, "int");
+					break;
+				case BOOLEAN:
+					mtd.put(DataExpression.VALUETYPEPARAM, "boolean");
+					break;
+				case STRING:
+					mtd.put(DataExpression.VALUETYPEPARAM, "string");
+					break;
+				case UNKNOWN:
+					mtd.put(DataExpression.VALUETYPEPARAM, "unknown");
+					break;
+				case OBJECT:
+					throw new IOException("Write of generic object types not supported.");
+			}
+			mtd.put(DataExpression.FORMAT_TYPE, "text");
+			mtd.put(DataExpression.DESCRIPTIONPARAM,
+					new OrderedJSONObject().put(DataExpression.AUTHORPARAM, "SystemML"));
+
+			// write metadata JSON object to file
+			mtd.write(br, 4); // indent with 4 spaces
+			br.close();
+		} catch (Exception e) {
+			throw new IOException("Error creating and writing metadata JSON file", e);
 		}
 	}
 	
@@ -633,7 +620,8 @@ public class MapReduceTool
 		if(fileToRead==null)
 			throw new RuntimeException("cannot read partition "+currentPart);
 		
-		FSDataInputStream currentStream=fs.open(fileToRead);
+		int buffsz = 64 * 1024;
+		FSDataInputStream currentStream=fs.open(fileToRead, buffsz);
 	    DoubleWritable readKey=new DoubleWritable();
 	    IntWritable readValue=new IntWritable();
 	    
@@ -706,7 +694,7 @@ public class MapReduceTool
 		}
 		
 		//NOTE: we depend on the configured umask, setting umask in job or fspermission has no effect
-		//similarly setting dfs.datanode.data.dir.perm as no effect either.
+		//similarly setting MRConfigurationNames.DFS_DATANODE_DATA_DIR_PERM as no effect either.
 	}
 	
 	

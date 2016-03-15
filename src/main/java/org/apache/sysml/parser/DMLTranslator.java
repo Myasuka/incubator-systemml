@@ -1009,7 +1009,7 @@ public class DMLTranslator
 				ae.setInputFormatType(Expression.convertFormatType(formatName));
 
 				if (ae.getDataType() == DataType.SCALAR ) {
-					ae.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), -1, -1);
+					ae.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), ae.getUpdateInPlace(), -1, -1);
 				}
 				else {
 					switch(ae.getInputFormatType()) {
@@ -1017,12 +1017,12 @@ public class DMLTranslator
 					case MM:
 					case CSV:
 						// write output in textcell format
-						ae.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), -1, -1);
+						ae.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), ae.getUpdateInPlace(), -1, -1);
 						break;
 						
 					case BINARY:
 						// write output in binary block format
-					    ae.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), DMLTranslator.DMLBlockSize, DMLTranslator.DMLBlockSize);
+					    ae.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), ae.getUpdateInPlace(), DMLTranslator.DMLBlockSize, DMLTranslator.DMLBlockSize);
 					    break;
 						
 						default:
@@ -1075,7 +1075,7 @@ public class DMLTranslator
 						Integer statementId = liveOutToTemp.get(target.getName());
 						if ((statementId != null) && (statementId.intValue() == i)) {
 							DataOp transientwrite = new DataOp(target.getName(), target.getDataType(), target.getValueType(), ae, DataOpTypes.TRANSIENTWRITE, null);
-							transientwrite.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), ae.getRowsInBlock(), ae.getColsInBlock());
+							transientwrite.setOutputParams(ae.getDim1(), ae.getDim2(), ae.getNnz(), ae.getUpdateInPlace(), ae.getRowsInBlock(), ae.getColsInBlock());
 							transientwrite.setAllPositions(target.getBeginLine(), target.getBeginColumn(), target.getEndLine(), target.getEndLine());
 							updatedLiveOut.addVariable(target.getName(), target);
 							output.add(transientwrite);
@@ -1107,7 +1107,7 @@ public class DMLTranslator
 						Integer statementId = liveOutToTemp.get(target.getName());
 						if ((statementId != null) && (statementId.intValue() == i)) {
 							DataOp transientwrite = new DataOp(target.getName(), target.getDataType(), target.getValueType(), ae, DataOpTypes.TRANSIENTWRITE, null);
-							transientwrite.setOutputParams(origDim1, origDim2, ae.getNnz(), ae.getRowsInBlock(), ae.getColsInBlock());
+							transientwrite.setOutputParams(origDim1, origDim2, ae.getNnz(), ae.getUpdateInPlace(), ae.getRowsInBlock(), ae.getColsInBlock());
 							transientwrite.setAllPositions(target.getBeginLine(), target.getBeginColumn(), target.getEndLine(), target.getEndColumn());
 							updatedLiveOut.addVariable(target.getName(), target);
 							output.add(transientwrite);
@@ -1983,6 +1983,14 @@ public class DMLTranslator
 									target.getValueType(), ParamBuiltinOp.TRANSFORM, 
 									paramHops);
 			break;	
+		
+		case TRANSFORMAPPLY:
+			currBuiltinOp = new ParameterizedBuiltinOp(
+									target.getName(), target.getDataType(), 
+									target.getValueType(), ParamBuiltinOp.TRANSFORMAPPLY, 
+									paramHops);
+			break;	
+			
 			
 		default:
 			
@@ -2188,9 +2196,21 @@ public class DMLTranslator
 			break;
 
 		case COLMEAN:
-			// hop to compute colSums
 			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(), target.getValueType(), AggOp.MEAN,
 					Direction.Col, expr);
+			break;
+
+		case COLSD:
+			// colStdDevs = sqrt(colVariances)
+			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), AggOp.VAR, Direction.Col, expr);
+			currBuiltinOp = new UnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), Hop.OpOp1.SQRT, currBuiltinOp);
+			break;
+
+		case COLVAR:
+			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), AggOp.VAR, Direction.Col, expr);
 			break;
 
 		case ROWSUM:
@@ -2221,6 +2241,19 @@ public class DMLTranslator
 		case ROWMEAN:
 			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(), target.getValueType(), AggOp.MEAN,
 					Direction.Row, expr);
+			break;
+
+		case ROWSD:
+			// rowStdDevs = sqrt(rowVariances)
+			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), AggOp.VAR, Direction.Row, expr);
+			currBuiltinOp = new UnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), Hop.OpOp1.SQRT, currBuiltinOp);
+			break;
+
+		case ROWVAR:
+			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), AggOp.VAR, Direction.Row, expr);
 			break;
 
 		case NROW:
@@ -2283,7 +2316,20 @@ public class DMLTranslator
 						Hop.OpOp3.CENTRALMOMENT, expr, expr2, orderHop);
 			}
 			break;
-			
+
+		case SD:
+			// stdDev = sqrt(variance)
+			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), AggOp.VAR, Direction.RowCol, expr);
+			currBuiltinOp = new UnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), Hop.OpOp1.SQRT, currBuiltinOp);
+			break;
+
+		case VAR:
+			currBuiltinOp = new AggUnaryOp(target.getName(), target.getDataType(),
+					target.getValueType(), AggOp.VAR, Direction.RowCol, expr);
+			break;
+
 		case MIN:
 			//construct AggUnary for min(X) but BinaryOp for min(X,Y)
 			if( expr2 == null ) {
@@ -2295,6 +2341,7 @@ public class DMLTranslator
 						expr, expr2);
 			}
 			break;
+
 		case MAX:
 			//construct AggUnary for max(X) but BinaryOp for max(X,Y)
 			if( expr2 == null ) {
@@ -2341,6 +2388,11 @@ public class DMLTranslator
 		case TRANS:
 			currBuiltinOp = new ReorgOp(target.getName(), target.getDataType(), target.getValueType(),
 					                    Hop.ReOrgOp.TRANSPOSE, expr);
+			break;
+		
+		case REV:
+			currBuiltinOp = new ReorgOp(target.getName(), target.getDataType(), target.getValueType(),
+					                    Hop.ReOrgOp.REV, expr);
 			break;
 			
 		case CBIND:
@@ -2664,10 +2716,15 @@ public class DMLTranslator
 			break;
 			
 		case INVERSE:
-			currBuiltinOp=new UnaryOp(target.getName(), target.getDataType(), target.getValueType(), 
+			currBuiltinOp = new UnaryOp(target.getName(), target.getDataType(), target.getValueType(), 
 					Hop.OpOp1.INVERSE, expr);
 			break;
 		
+		case CHOLESKY:
+			currBuiltinOp = new UnaryOp(target.getName(), target.getDataType(), target.getValueType(), 
+					Hop.OpOp1.CHOLESKY, expr);
+			break;	
+			
 		case OUTER:
 			if( !(expr3 instanceof LiteralOp) )
 				throw new HopsException("Operator for outer builtin function must be a constant: "+expr3);			

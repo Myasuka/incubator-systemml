@@ -21,7 +21,6 @@ package org.apache.sysml.runtime.instructions.spark;
 
 import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.storage.StorageLevel;
-
 import org.apache.sysml.hops.OptimizerUtils;
 import org.apache.sysml.runtime.DMLRuntimeException;
 import org.apache.sysml.runtime.DMLUnsupportedOperationException;
@@ -34,9 +33,11 @@ import org.apache.sysml.runtime.instructions.cp.BooleanObject;
 import org.apache.sysml.runtime.instructions.cp.CPOperand;
 import org.apache.sysml.runtime.instructions.spark.data.RDDObject;
 import org.apache.sysml.runtime.instructions.spark.functions.CopyBlockFunction;
+import org.apache.sysml.runtime.instructions.spark.functions.CreateSparseBlockFunction;
 import org.apache.sysml.runtime.matrix.MatrixCharacteristics;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
 import org.apache.sysml.runtime.matrix.data.MatrixIndexes;
+import org.apache.sysml.runtime.matrix.data.SparseBlock;
 import org.apache.sysml.runtime.matrix.operators.Operator;
 
 
@@ -78,9 +79,10 @@ public class CheckpointSPInstruction extends UnarySPInstruction
 		// (checkpoints are generated for all read only variables in loops; due to unbounded scoping and 
 		// conditional control flow they to not necessarily exist in the symbol table during runtime - 
 		// this is valid if relevant branches are never entered)
-		if( sec.getVariable( input1.getName() ) == null ) {
+		if( sec.getVariable( input1.getName() ) == null || sec.getVariable( input1.getName() ) instanceof BooleanObject) {
 			//add a dummy entry to the input, which will be immediately overwritten by the null output.
 			sec.setVariable( input1.getName(), new BooleanObject(false));
+			sec.setVariable( output.getName(), new BooleanObject(false));
 			return;
 		}
 		
@@ -110,7 +112,12 @@ public class CheckpointSPInstruction extends UnarySPInstruction
 				//apply a narrow shallow copy to allow for short-circuit collects 
 				out = in.mapValues(new CopyBlockFunction(false));	
 			}
-				
+		
+			//convert mcsr into memory-efficient csr if potentially sparse
+			if( OptimizerUtils.checkSparseBlockCSRConversion(mcIn) ) {				
+				out = out.mapValues(new CreateSparseBlockFunction(SparseBlock.Type.CSR));
+			}
+			
 			//actual checkpoint into given storage level
 			out = out.persist( _level );
 		}

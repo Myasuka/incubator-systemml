@@ -33,7 +33,6 @@ import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.rdd.RDD;
-
 import org.apache.sysml.api.DMLScript.RUNTIME_PLATFORM;
 import org.apache.sysml.api.jmlc.JMLCUtils;
 import org.apache.sysml.api.monitoring.SparkMonitoringUtil;
@@ -64,7 +63,6 @@ import org.apache.sysml.runtime.controlprogram.context.ExecutionContextFactory;
 import org.apache.sysml.runtime.controlprogram.context.SparkExecutionContext;
 import org.apache.sysml.runtime.instructions.Instruction;
 import org.apache.sysml.runtime.instructions.cp.Data;
-import org.apache.sysml.runtime.instructions.cp.VariableCPInstruction;
 import org.apache.sysml.runtime.instructions.spark.data.RDDObject;
 import org.apache.sysml.runtime.instructions.spark.data.RDDProperties;
 import org.apache.sysml.runtime.instructions.spark.functions.ConvertStringToLongTextPair;
@@ -81,7 +79,6 @@ import org.apache.sysml.runtime.matrix.data.OutputInfo;
 import org.apache.sysml.utils.Explain;
 import org.apache.sysml.utils.Statistics;
 import org.apache.sysml.utils.Explain.ExplainCounts;
-
 import org.apache.spark.sql.DataFrame;
 import org.apache.spark.sql.SQLContext;
 
@@ -195,6 +192,8 @@ public class MLContext {
 	private LocalVariableMap _variables = null; // temporary symbol table
 	private Program _rtprog = null;
 	
+	private HashMap<String, String> _additionalConfigs = new HashMap<String, String>();
+	
 	// --------------------------------------------------
 	// _monitorUtils is set only when MLContext(sc, true)
 	private SparkMonitoringUtil _monitorUtils = null;
@@ -224,6 +223,15 @@ public class MLContext {
 	 */
 	public MLContext(JavaSparkContext sc) throws DMLRuntimeException {
 		initializeSpark(sc.sc(), false, false);
+	}
+	
+	/**
+	 * Allow users to provide custom named-value configuration.
+	 * @param paramName
+	 * @param paramVal
+	 */
+	public void setConfig(String paramName, String paramVal) {
+		_additionalConfigs.put(paramName, paramVal);
 	}
 	
 	// ====================================================================================
@@ -477,18 +485,18 @@ public class MLContext {
 			_inVarnames = new ArrayList<String>();
 		
 		MatrixObject mo = null;
-		if(format.compareTo("csv") == 0) {
+		if( format.equals("csv") ) {
 			MatrixCharacteristics mc = new MatrixCharacteristics(rlen, clen, DMLTranslator.DMLBlockSize, DMLTranslator.DMLBlockSize, nnz);
 			mo = new MatrixObject(ValueType.DOUBLE, null, new MatrixFormatMetaData(mc, OutputInfo.CSVOutputInfo, InputInfo.CSVInputInfo));
 		}
-		else if(format.compareTo("text") == 0) {
+		else if( format.equals("text") ) {
 			if(rlen == -1 || clen == -1) {
 				throw new DMLRuntimeException("The metadata is required in registerInput for format:" + format);
 			}
 			MatrixCharacteristics mc = new MatrixCharacteristics(rlen, clen, DMLTranslator.DMLBlockSize, DMLTranslator.DMLBlockSize, nnz);
 			mo = new MatrixObject(ValueType.DOUBLE, null, new MatrixFormatMetaData(mc, OutputInfo.TextCellOutputInfo, InputInfo.TextCellInputInfo));
 		}
-		else if(format.compareTo("mm") == 0) {
+		else if( format.equals("mm") ) {
 			// TODO: Handle matrix market
 			throw new DMLRuntimeException("Matrixmarket format is not yet implemented in registerInput: " + format);
 		}
@@ -622,7 +630,7 @@ public class MLContext {
 		String [] args = new String[namedArgs.size()];
 		int i = 0;
 		for(Entry<String, String> entry : namedArgs.entrySet()) {
-			if(entry.getValue().trim().compareTo("") == 0)
+			if(entry.getValue().trim().isEmpty())
 				args[i] = entry.getKey() + "=\"" + entry.getValue() + "\"";
 			else
 				args[i] = entry.getKey() + "=" + entry.getValue();
@@ -644,7 +652,7 @@ public class MLContext {
 		String [] args = new String[namedArgs.size()];
 		int i = 0;
 		for(Entry<String, String> entry : namedArgs.entrySet()) {
-			if(entry.getValue().trim().compareTo("") == 0)
+			if(entry.getValue().trim().isEmpty())
 				args[i] = entry.getKey() + "=\"" + entry.getValue() + "\"";
 			else
 				args[i] = entry.getKey() + "=" + entry.getValue();
@@ -891,9 +899,17 @@ public class MLContext {
 	/**
 	 * Call this method if you want to clear any RDDs set via registerInput, registerOutput.
 	 * This is required if ml.execute(..) has been called earlier and you want to call a new DML script. 
+	 * Note: By default this doesnot clean up configuration set using setConfig method. 
+	 * To clean the configuration as along with registered input/outputs, please use reset(true);
 	 * @throws DMLRuntimeException 
 	 */
 	public void reset() 
+			throws DMLRuntimeException 
+	{
+		reset(false);
+	}
+	
+	public void reset(boolean cleanupConfig) 
 			throws DMLRuntimeException 
 	{
 		//cleanup variables from bufferpool, incl evicted files 
@@ -904,6 +920,8 @@ public class MLContext {
 		_inVarnames = null;
 		_outVarnames = null;
 		_variables = null;
+		if(cleanupConfig)
+			_additionalConfigs.clear();
 	}
 	
 	/**
@@ -961,34 +979,8 @@ public class MLContext {
 	 * @return
 	 */
 	ArrayList<Instruction> performCleanupAfterRecompilation(ArrayList<Instruction> tmp) {
-		String [] outputs = null;
-		if(_outVarnames != null) {
-			outputs = _outVarnames.toArray(new String[0]);
-		}
-		else {
-			outputs = new String[0];
-		}
-		
-		// No need to clean up entire program as this method is only called for last level program block
-//		JMLCUtils.cleanupRuntimeProgram(_rtprog, outputs);
-		
-		for( int i=0; i<tmp.size(); i++ )
-		{
-			Instruction linst = tmp.get(i);
-			if( linst instanceof VariableCPInstruction && ((VariableCPInstruction)linst).isRemoveVariable() )
-			{
-				VariableCPInstruction varinst = (VariableCPInstruction) linst;
-				for( String var : outputs )
-					if( varinst.isRemoveVariable(var) )
-					{
-						tmp.remove(i);
-						i--;
-						break;
-					}
-			}
-		}
-		
-		return tmp;
+		String [] outputs = (_outVarnames != null) ? _outVarnames.toArray(new String[0]) : new String[0];
+		return JMLCUtils.cleanupRuntimeInstructions(tmp, outputs);
 	}
 	
 	// -------------------------------- Utility methods ends ----------------------------------------------------------
@@ -1047,7 +1039,7 @@ public class MLContext {
 	private boolean isRegisteredAsInput(String varName) {
 		if(_inVarnames != null) {
 			for(String v : _inVarnames) {
-				if(v.compareTo(varName) == 0) {
+				if(v.equals(varName)) {
 					return true;
 				}
 			}
@@ -1131,14 +1123,40 @@ public class MLContext {
 	 * @throws DMLException
 	 * @throws ParseException
 	 */
-	public MLOutput executeScript(String dmlScript) throws IOException, DMLException, ParseException {
+	public MLOutput executeScript(String dmlScript)
+			throws IOException, DMLException, ParseException {
 		return compileAndExecuteScript(dmlScript, null, false, false, false, null);
 	}
 	
-	public MLOutput executeScript(String dmlScript, String configFilePath) throws IOException, DMLException, ParseException {
+	public MLOutput executeScript(String dmlScript, String configFilePath)
+			throws IOException, DMLException, ParseException {
 		return compileAndExecuteScript(dmlScript, null, false, false, false, configFilePath);
 	}
-	
+
+	public MLOutput executeScript(String dmlScript, scala.collection.immutable.Map<String, String> namedArgs)
+			throws IOException, DMLException, ParseException {
+		return executeScript(dmlScript, new HashMap<String, String>(scala.collection.JavaConversions.mapAsJavaMap(namedArgs)), null);
+	}
+
+	public MLOutput executeScript(String dmlScript, scala.collection.immutable.Map<String, String> namedArgs, String configFilePath)
+			throws IOException, DMLException, ParseException {
+		return executeScript(dmlScript, new HashMap<String, String>(scala.collection.JavaConversions.mapAsJavaMap(namedArgs)), configFilePath);
+	}
+
+	public MLOutput executeScript(String dmlScript, HashMap<String, String> namedArgs, String configFilePath)
+			throws IOException, DMLException, ParseException {
+		String [] args = new String[namedArgs.size()];
+		int i = 0;
+		for(Entry<String, String> entry : namedArgs.entrySet()) {
+			if(entry.getValue().trim().isEmpty())
+				args[i] = entry.getKey() + "=\"" + entry.getValue() + "\"";
+			else
+				args[i] = entry.getKey() + "=" + entry.getValue();
+			i++;
+		}
+		return compileAndExecuteScript(dmlScript, args, false, true, false, configFilePath);
+	}
+
 	private void checkIfRegisteringInputAllowed() throws DMLRuntimeException {
 		if(!(DMLScript.rtplatform == RUNTIME_PLATFORM.SPARK || DMLScript.rtplatform == RUNTIME_PLATFORM.HYBRID_SPARK)) {
 			throw new DMLRuntimeException("ERROR: registerInput is only allowed for spark execution mode");
@@ -1167,11 +1185,16 @@ public class MLContext {
 				throw new DMLRuntimeException("SystemML (and hence by definition MLContext) doesnot support parallel execute() calls from same or different MLContexts. "
 						+ "As a temporary fix, please do explicit synchronization, i.e. synchronized(MLContext.class) { ml.execute(...) } ");
 			}
-			else {
-				// Set active MLContext.
-				_activeMLContext = this;
-			}
 			
+			// Set active MLContext.
+			_activeMLContext = this;
+			
+			// Setup parser parameters
+			// TODO In the process of hardening mlcontext, we should also reinvestigate if we
+			// could be more restrictive and require known dimensions (rm REJECT_READ_WRITE_UNKNOWNS).  
+			AParserWrapper.IGNORE_UNSPECIFIED_ARGS = true;
+			DataExpression.REJECT_READ_WRITE_UNKNOWNS = false;
+			OptimizerUtils.ALLOW_CSE_PERSISTENT_READS = false;
 			
 			if(_monitorUtils != null) {
 				_monitorUtils.resetMonitoringData();
@@ -1232,6 +1255,12 @@ public class MLContext {
 		finally {
 			// Reset active MLContext.
 			_activeMLContext = null;
+			
+			// Reset parser parameters
+			AParserWrapper.IGNORE_UNSPECIFIED_ARGS = false;
+			DataExpression.REJECT_READ_WRITE_UNKNOWNS = true;		
+			OptimizerUtils.ALLOW_CSE_PERSISTENT_READS = 
+					OptimizerUtils.ALLOW_COMMON_SUBEXPRESSION_ELIMINATION;			
 		}
 	}
 	
@@ -1262,6 +1291,10 @@ public class MLContext {
 			config = new DMLConfig(configFilePath);
 		}
 		
+		for(Entry<String, String> param : _additionalConfigs.entrySet()) {
+			config.setTextValue(param.getKey(), param.getValue());
+		}
+		
 		ConfigurationManager.setConfig(config);
 		
 		String dmlScriptStr = null;
@@ -1274,17 +1307,12 @@ public class MLContext {
 			_monitorUtils.setDMLString(dmlScriptStr);
 		}
 		
-		DataExpression.REJECT_READ_UNKNOWN_SIZE = false;
-		
 		//simplified compilation chain
 		_rtprog = null;
 		
 		//parsing
 		AParserWrapper parser = AParserWrapper.createParser(parsePyDML);
 		DMLProgram prog = parser.parse(dmlScriptFilePath, dmlScriptStr, argVals);
-		if(prog == null) {
-			throw new ParseException("Couldnot parse the file:" + dmlScriptFilePath);
-		}
 		
 		//language validate
 		DMLTranslator dmlt = new DMLTranslator(prog);
@@ -1330,8 +1358,6 @@ public class MLContext {
 		if(inputSymbolTable != null) {
 			ec.setVariables(inputSymbolTable);
 		}
-		
-		// System.out.println(Explain.explain(_rtprog));
 		
 		//core execute runtime program	
 		_rtprog.execute( ec );

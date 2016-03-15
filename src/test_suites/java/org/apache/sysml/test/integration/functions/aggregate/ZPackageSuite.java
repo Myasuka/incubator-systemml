@@ -40,12 +40,20 @@ import org.junit.runners.Suite;
 	RowSumsSqTest.class,
 	ColSumsSqTest.class,
 	TraceTest.class,
-  
+	StdDevTest.class,
+	RowStdDevsTest.class,
+	ColStdDevsTest.class,
+	VarianceTest.class,
+	RowVariancesTest.class,
+	ColVariancesTest.class,
+
 	FullAggregateTest.class,
 	FullColAggregateTest.class,
 	FullGroupedAggregateTest.class,
 	FullGroupedAggregateMatrixTest.class,
-	FullRowAggregateTest.class
+	FullRowAggregateTest.class,
+	
+	PushdownSumBinaryTest.class,
 })
 
 

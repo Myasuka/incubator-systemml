@@ -36,14 +36,15 @@ import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.mapred.Counters.Group;
 import org.apache.hadoop.mapred.FileInputFormat;
 import org.apache.hadoop.mapred.FileOutputFormat;
 import org.apache.hadoop.mapred.JobClient;
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.Partitioner;
 import org.apache.hadoop.mapred.RunningJob;
-import org.apache.hadoop.mapred.Counters.Group;
-
+import org.apache.sysml.conf.ConfigurationManager;
+import org.apache.sysml.conf.DMLConfig;
 import org.apache.sysml.lops.Lop;
 import org.apache.sysml.lops.SortKeys;
 import org.apache.sysml.runtime.DMLRuntimeException;
@@ -57,6 +58,7 @@ import org.apache.sysml.runtime.matrix.data.InputInfo;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
 import org.apache.sysml.runtime.matrix.data.MatrixIndexes;
 import org.apache.sysml.runtime.matrix.data.OutputInfo;
+import org.apache.sysml.runtime.matrix.mapred.MRConfigurationNames;
 import org.apache.sysml.runtime.matrix.mapred.MRJobConfiguration;
 import org.apache.sysml.runtime.matrix.mapred.MRJobConfiguration.ConvertTarget;
 import org.apache.sysml.runtime.matrix.sort.CompactInputFormat;
@@ -65,9 +67,9 @@ import org.apache.sysml.runtime.matrix.sort.IndexSortComparable;
 import org.apache.sysml.runtime.matrix.sort.IndexSortComparableDesc;
 import org.apache.sysml.runtime.matrix.sort.IndexSortMapper;
 import org.apache.sysml.runtime.matrix.sort.IndexSortReducer;
+import org.apache.sysml.runtime.matrix.sort.IndexSortStitchupMapper;
 import org.apache.sysml.runtime.matrix.sort.IndexSortStitchupReducer;
 import org.apache.sysml.runtime.matrix.sort.SamplingSortMRInputFormat;
-import org.apache.sysml.runtime.matrix.sort.IndexSortStitchupMapper;
 import org.apache.sysml.runtime.matrix.sort.ValueSortMapper;
 import org.apache.sysml.runtime.matrix.sort.ValueSortReducer;
 import org.apache.sysml.runtime.util.MapReduceTool;
@@ -196,13 +198,19 @@ public class SortMR
 	    Path outpath = new Path(tmpOutput);
 	    FileOutputFormat.setOutputPath(job, outpath);	    
 	    MapReduceTool.deleteFileIfExistOnHDFS(outpath, job);
-	    
+
 	    //set number of reducers (1 if local mode)
-	    if( InfrastructureAnalyzer.isLocalMode(job) )
-	    	job.setNumReduceTasks(1);
-	    else
+		if( !InfrastructureAnalyzer.isLocalMode(job) ) {
 	    	MRJobConfiguration.setNumReducers(job, numReducers, numReducers);
-	    
+	    	//ensure partition size <= 10M records to avoid scalability bottlenecks
+	    	//on cp-side qpick instructions for quantile/iqm/median (~128MB)
+	    	if( !(getSortInstructionType(sortInst)==SortKeys.OperationTypes.Indexes) )
+	    		job.setNumReduceTasks((int)Math.max(job.getNumReduceTasks(), rlen/10000000));
+	    }
+	    else //in case of local mode
+	    	job.setNumReduceTasks(1);
+	    	
+	    	
 	    //setup input/output format
 	    job.setInputFormat(SamplingSortMRInputFormat.class);
 	    SamplingSortMRInputFormat.setTargetKeyValueClasses(job, (Class<? extends WritableComparable>) outputInfo.outputKeyClass, outputInfo.outputValueClass);
@@ -245,7 +253,11 @@ public class SortMR
 	    DistributedCache.createSymlink(job);
 	    
 	    //setup replication factor
-	    job.setInt("dfs.replication", replication);
+	    job.setInt(MRConfigurationNames.DFS_REPLICATION, replication);
+	    
+		//set up custom map/reduce configurations 
+		DMLConfig config = ConfigurationManager.getConfig();
+		MRJobConfiguration.setupCustomMRConfigurations(job, config);
 	    
 		MatrixCharacteristics[] s = new MatrixCharacteristics[1];
 		s[0] = new MatrixCharacteristics(rlen, clen, brlen, bclen);
@@ -403,7 +415,7 @@ public class SortMR
 	    job.set(SORT_INDEXES_OFFSETS, Arrays.toString(cumsumCounts));
 	    
 	    //setup replication factor
-	    job.setInt("dfs.replication", replication);
+	    job.setInt(MRConfigurationNames.DFS_REPLICATION, replication);
 	    
 		//set unique working dir
 		MRJobConfiguration.setUniqueWorkingDir(job);

@@ -39,7 +39,6 @@ import org.apache.wink.json4j.JSONObject;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
-
 import org.apache.sysml.api.DMLScript;
 import org.apache.sysml.api.DMLScript.RUNTIME_PLATFORM;
 import org.apache.sysml.api.MLContext;
@@ -825,22 +824,13 @@ public abstract class AutomatedTestBase
 
 			// Create a SystemML config file for this test case.
 			// Use the canned file under src/test/config as a template
-			String configTemplate = FileUtils.readFileToString(CONFIG_TEMPLATE_FILE,
-					"UTF-8");
+			String configTemplate = FileUtils.readFileToString(CONFIG_TEMPLATE_FILE, "UTF-8");
 			
-			// *** HACK ALERT *** HACK ALERT *** HACK ALERT ***
-			// Nimble does not accept paths that use backslash as the separator character.
-			// Since some of the tests use Nimble, we use forward slash in the paths that
-			// we put into the config file.
-			String localTempForwardSlash = curLocalTempDir.getPath().replace(File.separator, "/");
+			String localTemp = curLocalTempDir.getPath();
 			String configContents = configTemplate.replace("<scratch>scratch_space</scratch>", 
-					String.format("<scratch>%s/scratch_space</scratch>", localTempForwardSlash));
+					String.format("<scratch>%s/scratch_space</scratch>", localTemp));
 			configContents = configContents.replace("<localtmpdir>/tmp/systemml</localtmpdir>", 
-					String.format("<localtmpdir>%s/localtmp</localtmpdir>", localTempForwardSlash));
-			configContents = configContents.replace("<NimbleScratch>nimbleoutput</NimbleScratch>", 
-					String.format("<NimbleScratch>%s/nimbleoutput</NimbleScratch>",
-							localTempForwardSlash));
-			// *** END HACK ***
+					String.format("<localtmpdir>%s/localtmp</localtmpdir>", localTemp));
 			
 			FileUtils.write(getCurConfigFile(), configContents, "UTF-8");
 			

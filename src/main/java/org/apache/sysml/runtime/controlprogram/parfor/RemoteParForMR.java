@@ -37,7 +37,6 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.RunningJob;
 import org.apache.hadoop.mapred.SequenceFileOutputFormat;
 import org.apache.hadoop.mapred.lib.NLineInputFormat;
-
 import org.apache.sysml.api.DMLScript;
 import org.apache.sysml.conf.ConfigurationManager;
 import org.apache.sysml.conf.DMLConfig;
@@ -52,6 +51,7 @@ import org.apache.sysml.runtime.controlprogram.parfor.stat.Stat;
 import org.apache.sysml.runtime.instructions.cp.Data;
 import org.apache.sysml.runtime.io.MatrixReader;
 import org.apache.sysml.runtime.matrix.MatrixCharacteristics;
+import org.apache.sysml.runtime.matrix.mapred.MRConfigurationNames;
 import org.apache.sysml.runtime.matrix.mapred.MRJobConfiguration;
 import org.apache.sysml.runtime.util.MapReduceTool;
 import org.apache.sysml.utils.Statistics;
@@ -150,19 +150,9 @@ public class RemoteParForMR
 			//job.setInt("mapred.tasktracker.tasks.maximum",1); //system property
 			//job.setInt("mapred.jobtracker.maxtasks.per.job",1); //system property
 
-			//use FLEX scheduler configuration properties
-			if( ParForProgramBlock.USE_FLEX_SCHEDULER_CONF )
-			{
-				job.setInt("flex.priority",0); //highest
-				
-				job.setInt("flex.map.min", 0);
-				job.setInt("flex.map.max", numMappers);
-				job.setInt("flex.reduce.min", 0);
-				job.setInt("flex.reduce.max", numMappers);
-			}
 			
 			//set jvm memory size (if require)
-			String memKey = "mapred.child.java.opts";
+			String memKey = MRConfigurationNames.MR_CHILD_JAVA_OPTS;
 			if( minMem > 0 && minMem > InfrastructureAnalyzer.extractMaxMemoryOpt(job.get(memKey)) )
 			{
 				InfrastructureAnalyzer.setMaxMemoryOpt(job, memKey, minMem);
@@ -170,27 +160,30 @@ public class RemoteParForMR
 			}
 			
 			//disable automatic tasks timeouts and speculative task exec
-			job.setInt("mapred.task.timeout", 0);			
+			job.setInt(MRConfigurationNames.MR_TASK_TIMEOUT, 0);
 			job.setMapSpeculativeExecution(false);
 			
 			//set up map/reduce memory configurations (if in AM context)
 			DMLConfig config = ConfigurationManager.getConfig();
 			DMLAppMasterUtils.setupMRJobRemoteMaxMemory(job, config);
 			
+			//set up custom map/reduce configurations 
+			MRJobConfiguration.setupCustomMRConfigurations(job, config);
+			
 			//enables the reuse of JVMs (multiple tasks per MR task)
 			if( jvmReuse )
 				job.setNumTasksToExecutePerJvm(-1); //unlimited
 			
 			//set sort io buffer (reduce unnecessary large io buffer, guaranteed memory consumption)
-			job.setInt("io.sort.mb", 8); //8MB
+			job.setInt(MRConfigurationNames.MR_TASK_IO_SORT_MB, 8); //8MB
 			
 			//set the replication factor for the results
-			job.setInt("dfs.replication", replication);
+			job.setInt(MRConfigurationNames.DFS_REPLICATION, replication);
 			
 			//set the max number of retries per map task
 			//  disabled job-level configuration to respect cluster configuration
 			//  note: this refers to hadoop2, hence it never had effect on mr1
-			//job.setInt("mapreduce.map.maxattempts", max_retry);
+			//job.setInt(MRConfigurationNames.MR_MAP_MAXATTEMPTS, max_retry);
 			
 			//set unique working dir
 			MRJobConfiguration.setUniqueWorkingDir(job);

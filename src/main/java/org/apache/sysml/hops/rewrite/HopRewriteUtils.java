@@ -25,6 +25,7 @@ import java.util.HashMap;
 import org.apache.sysml.api.DMLScript;
 import org.apache.sysml.api.DMLScript.RUNTIME_PLATFORM;
 import org.apache.sysml.hops.AggBinaryOp;
+import org.apache.sysml.hops.AggUnaryOp;
 import org.apache.sysml.hops.BinaryOp;
 import org.apache.sysml.hops.DataOp;
 import org.apache.sysml.hops.Hop;
@@ -32,6 +33,7 @@ import org.apache.sysml.hops.Hop.AggOp;
 import org.apache.sysml.hops.Hop.DataGenMethod;
 import org.apache.sysml.hops.DataGenOp;
 import org.apache.sysml.hops.Hop.DataOpTypes;
+import org.apache.sysml.hops.Hop.Direction;
 import org.apache.sysml.hops.Hop.FileFormatTypes;
 import org.apache.sysml.hops.Hop.OpOp2;
 import org.apache.sysml.hops.Hop.ParamBuiltinOp;
@@ -478,9 +480,19 @@ public class HopRewriteUtils
 	 * @param input
 	 * @return
 	 */
-	public static ReorgOp createTranspose(Hop input)
+	public static ReorgOp createTranspose(Hop input) {
+		return createReorg(input, ReOrgOp.TRANSPOSE);
+	}
+	
+	/**
+	 * 
+	 * @param input
+	 * @param rop
+	 * @return
+	 */
+	public static ReorgOp createReorg(Hop input, ReOrgOp rop)
 	{
-		ReorgOp transpose = new ReorgOp(input.getName(), input.getDataType(), input.getValueType(), ReOrgOp.TRANSPOSE, input);
+		ReorgOp transpose = new ReorgOp(input.getName(), input.getDataType(), input.getValueType(), rop, input);
 		HopRewriteUtils.setOutputBlocksizes(transpose, input.getRowsInBlock(), input.getColsInBlock());
 		HopRewriteUtils.copyLineNumbers(input, transpose);
 		transpose.refreshSizeInformation();	
@@ -537,6 +549,34 @@ public class HopRewriteUtils
 		bop.refreshSizeInformation();	
 		
 		return bop;
+	}
+	
+	/**
+	 * 
+	 * @param input
+	 * @return
+	 */
+	public static AggUnaryOp createSum( Hop input ) {
+		return createAggUnaryOp(input, AggOp.SUM, Direction.RowCol);
+	}
+	
+	/**
+	 * 
+	 * @param input
+	 * @param op
+	 * @param dir
+	 * @return
+	 */
+	public static AggUnaryOp createAggUnaryOp( Hop input, AggOp op, Direction dir )
+	{
+		DataType dt = (dir==Direction.RowCol) ? DataType.SCALAR : input.getDataType();
+		
+		AggUnaryOp auop = new AggUnaryOp(input.getName(), dt, input.getValueType(), op, dir, input);
+		auop.setRowsInBlock(input.getRowsInBlock());
+		auop.setColsInBlock(input.getColsInBlock());
+		auop.refreshSizeInformation();
+		
+		return auop;
 	}
 	
 	/**
@@ -860,6 +900,29 @@ public class HopRewriteUtils
 	 * 
 	 * @param hop
 	 * @return
+	 */
+	public static boolean isBasicN1Sequence(Hop hop)
+	{
+		boolean ret = false;
+		
+		if( hop instanceof DataGenOp )
+		{
+			DataGenOp dgop = (DataGenOp) hop;
+			if( dgop.getOp() == DataGenMethod.SEQ ){
+				Hop to = dgop.getInput().get(dgop.getParamIndex(Statement.SEQ_TO));
+				Hop incr = dgop.getInput().get(dgop.getParamIndex(Statement.SEQ_INCR));
+				ret = (to instanceof LiteralOp && getDoubleValueSafe((LiteralOp)to)==1)
+					&&(incr instanceof LiteralOp && getDoubleValueSafe((LiteralOp)incr)==-1);
+			}
+		}
+		
+		return ret;
+	}
+	
+	/**
+	 * 
+	 * @param hop
+	 * @return
 	 * @throws HopsException
 	 */
 	public static double getBasic1NSequenceMax(Hop hop) 
@@ -1055,6 +1118,14 @@ public class HopRewriteUtils
 	public static boolean isValidOp( OpOp2 input, OpOp2[] validTab )
 	{
 		for( OpOp2 valid : validTab )
+			if( valid == input )
+				return true;
+		return false;
+	}
+	
+	public static boolean isValidOp( ReOrgOp input, ReOrgOp[] validTab )
+	{
+		for( ReOrgOp valid : validTab )
 			if( valid == input )
 				return true;
 		return false;

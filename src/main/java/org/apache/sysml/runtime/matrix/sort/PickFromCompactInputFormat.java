@@ -48,8 +48,7 @@ import org.apache.sysml.runtime.matrix.data.Pair;
 
 //key class to read has to be DoubleWritable
 public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, MatrixCell>
-{
-		
+{		
 	public static final String VALUE_IS_WEIGHT="value.is.weight";
 	public static final String INPUT_IS_VECTOR="input.is.vector";
 	public static final String SELECTED_RANGES="selected.ranges";
@@ -191,11 +190,9 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 				wt += counts[partID];
 		}
 		sb.append(partID+"," + (wt-counts[partID]) + ";"); 
-		
 		sb.append(sumwt + "," + lbound + "," + ubound);
-		//System.out.println("range string: " + sb.toString());
+		
 		job.set(SELECTED_RANGES, sb.toString());
-
 		job.setBoolean(INPUT_IS_VECTOR, false);
 	}
 	
@@ -222,42 +219,49 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 	
 	public static class RangePickRecordReader implements RecordReader<MatrixIndexes, MatrixCell>
 	{
-		//private boolean valueIsWeight=true;
-		protected long totLength;
-		protected FileSystem fs;
-		protected Path path;
-		protected JobConf conf;
+		private Path path;
 	    
-	    protected FSDataInputStream currentStream;
-		
-		private int startPos=0;
-		private int numToRead=0;
-		DoubleWritable readKey=new DoubleWritable();
-		Writable readValue = new IntWritable(0);
+		private FSDataInputStream currentStream;
+		protected long totLength;
+		private DoubleWritable readKey=new DoubleWritable();
+		private IntWritable readValue = new IntWritable(0);
 		private boolean noRecordsNeeded=false;
-		private int rawKeyValuesRead=0;
 		private int index=0;
-		//private int currentRepeat=0;
+		private int beginPart=-1, endPart=-1, currPart=-1;
+		private double sumwt = 0.0, readWt;  // total weight (set in JobConf)
+		private double lbound, ubound;
+		private HashMap<Integer,Double> partWeights = null;
+		private boolean isFirstRecord = true;
+		private ReadWithZeros reader=null;
 		
-		int beginPart=-1, endPart=-1, currPart=-1;
-		double sumwt = 0.0, readWt, wtUntilCurrPart;  // total weight (set in JobConf)
-		double lbound, ubound;
-		double[] partWeights = null;
-		boolean isFirstRecord = true;
-		
-		
-		//to handle zeros
-		ReadWithZeros reader=null;
-		/*private boolean contain0s=false;
-		private boolean justFound0=false;
-		private DoubleWritable keyAfterZero;
-		private Writable valueAfterZero; 
-		private long numZeros=0;*/
-		
-		private int getIndexInTheArray(String name)
+		public RangePickRecordReader(JobConf job, FileSplit split) 
+			throws IOException 
 		{
+			parseSelectedRangeString(job.get(SELECTED_RANGES));
+			
+			// check if the current part file needs to be processed
+	    	path = split.getPath();
+	    	totLength = split.getLength();
+	    	currentStream = FileSystem.get(job).open(path);
+	    	currPart = getIndexInTheArray(path.getName());
+	    	
+	    	if ( currPart < beginPart || currPart > endPart ) {
+	    		noRecordsNeeded = true;
+	    		return;
+	    	}
+	    	
+			int part0=job.getInt(PARTITION_OF_ZERO, -1);
+			boolean contain0s=false;
+			long numZeros =0;
+	    	if(part0==currPart) {
+	    		contain0s = true;
+	    		numZeros = job.getLong(NUMBER_OF_ZERO, 0);
+	    	}
+	    	reader=new ReadWithZeros(currentStream, contain0s, numZeros);
+		}
+		
+		private int getIndexInTheArray(String name) {
 			int i=name.indexOf("part-");
-			assert(i>=0);
 			return Integer.parseInt(name.substring(i+5));
 		}
 		
@@ -266,7 +270,7 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 			String[] f2 = null;
 			
 			// Each field of the form: "pid,wt" where wt is the total wt until the part pid
-			partWeights = new double[f1.length-1];
+			partWeights = new HashMap<Integer,Double>();
 			for(int i=0; i < f1.length-1; i++) {
 				f2 = f1[i].split(",");
 				if(i==0) {
@@ -275,7 +279,7 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 				if (i==f1.length-2) {
 					endPart = Integer.parseInt(f2[0]);
 				}
-				partWeights[i] = Double.parseDouble(f2[1]);
+				partWeights.put(i, Double.parseDouble(f2[1]));
 			}
 			
 			// last field: "sumwt, lbound, ubound"
@@ -284,49 +288,11 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 			lbound = Double.parseDouble(f2[1]);
 			ubound = Double.parseDouble(f2[2]);
 		}
-
-		@SuppressWarnings("unchecked")
-		public RangePickRecordReader(JobConf job, FileSplit split) throws IOException {
-			parseSelectedRangeString(job.get(SELECTED_RANGES));
-			
-			// check if the current part file needs to be processed
-	    	path = split.getPath();
-	    	totLength = split.getLength();
-	    	currentStream = FileSystem.get(job).open(path);
-	    	currPart = getIndexInTheArray(path.getName());
-	    	//System.out.println("RangePickRecordReader(): sumwt " + sumwt + " currPart " + currPart + " partRange [" + beginPart + "," + endPart + "]");
-	    	
-	    	if ( currPart < beginPart || currPart > endPart ) {
-	    		System.out.println("    currPart is out of range. Skipping part!");
-	    		noRecordsNeeded = true;
-	    		return;
-	    	}
-	    	
-	    	Class<? extends Writable> valueClass=(Class<? extends Writable>) job.getClass(VALUE_CLASS, Writable.class);
-	    	try {
-	    	//	readKey=keyClass.newInstance();
-				readValue=valueClass.newInstance();
-			} catch (Exception e) {
-				throw new RuntimeException(e);
-			}
-			//valueIsWeight=job.getBoolean(VALUE_IS_WEIGHT, true);
-			
-			int part0=job.getInt(PARTITION_OF_ZERO, -1);
-			boolean contain0s=false;
-			long numZeros =0;
-	    	if(part0==currPart)
-	    	{
-	    		contain0s = true;
-	    		numZeros = job.getLong(NUMBER_OF_ZERO, 0);
-	    	}
-	    	reader=new ReadWithZeros(currentStream, contain0s, numZeros);
-		}
 		
-		public boolean next(MatrixIndexes key, MatrixCell value) throws IOException {
-			assert(currPart!=-1);
-			
+		public boolean next(MatrixIndexes key, MatrixCell value) 
+			throws IOException 
+		{	
 			if(noRecordsNeeded)
-				// this part file does not fall within the required range of values
 				return false;
 
 			double qLowerD = sumwt*lbound; // lower quantile in double 
@@ -334,52 +300,48 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 			
 			// weight until current part
 			if (isFirstRecord) {
-				readWt = partWeights[currPart];
-				wtUntilCurrPart = partWeights[currPart];
+				if( !partWeights.containsKey(currPart) )
+					return false; //noRecordsNeeded
+				readWt = partWeights.get(currPart);
 				isFirstRecord = false;
 			}
 			double tmpWt = 0;
 			
 			if ( currPart == beginPart || currPart == endPart ) {
-				//readWt = partWeights[currPart];
-				
-				reader.readNextKeyValuePairs(readKey, (IntWritable)readValue);
-				tmpWt = ((IntWritable)readValue).get();
+				boolean ret = reader.readNextKeyValuePairs(readKey, readValue);
+				tmpWt = readValue.get();
 
 				while(readWt+tmpWt < qLowerD) {
 					readWt += tmpWt;
-					reader.readNextKeyValuePairs(readKey, (IntWritable)readValue);
-					tmpWt = ((IntWritable)readValue).get();
+					ret &= reader.readNextKeyValuePairs(readKey, readValue);
+					tmpWt = readValue.get();
 				}
 				
 				if((readWt<qLowerD && readWt+tmpWt >= qLowerD) || (readWt+tmpWt <= qUpperD) || (readWt<qUpperD && readWt+tmpWt>=qUpperD)) {
 					key.setIndexes(++index,1);
 					value.setValue(readKey.get()*tmpWt);
 					readWt += tmpWt;
-					//System.out.println("currpart " + currPart + ", return (" + index +",1): " + readKey.get()*tmpWt + "| [" + readKey.get() + "," + tmpWt +"] readWt=" + readWt);
-					return true;
+					return ret;
 				}
 				else {
 					return false;
 				}
 			}
-			else { //if(currPart != beginPart && currPart != endPart) {
+			else { 
 				// read full part
-				reader.readNextKeyValuePairs(readKey, (IntWritable)readValue);
-				tmpWt = ((IntWritable)readValue).get();
+				boolean ret = reader.readNextKeyValuePairs(readKey, readValue);
+				tmpWt = readValue.get();
 				
 				key.setIndexes(++index,1);
 				value.setValue(readKey.get()*tmpWt);
 				
 				readWt += tmpWt;
-				//System.out.println("currpart " + currPart + ", return (" + index +",1): " + readKey.get()*tmpWt + "| [" + readKey.get() + "," + tmpWt +"] readWt=" + readWt);
-				return true;
+				return ret;
 			}
 		}
 		
 		@Override
 		public void close() throws IOException {
-			//DO Nothing
 			currentStream.close();
 		}
 
@@ -401,85 +363,65 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 
 		@Override
 		public float getProgress() throws IOException {
-			if(numToRead>0)
-				return (float)(rawKeyValuesRead-startPos)/(float)numToRead;
-			else
-				return 100.0f;
+			float progress = (float) getPos() / totLength;
+			return (progress>=0 && progress<=1) ? progress : 1.0f;
 		}
 	}
 	
+	/**
+	 * 
+	 */
 	public static class PickRecordReader implements RecordReader<MatrixIndexes, MatrixCell>
 	{
 		private boolean valueIsWeight=true;
-		protected long totLength;
-		protected FileSystem fs;
-		protected Path path;
-		protected JobConf conf;
-	    
-	    protected FSDataInputStream currentStream;
+		private FileSystem fs;
+		private Path path;
+		
+	    private FSDataInputStream currentStream;
 		private int posIndex=0;
 		
 		private int[] pos=null; //starting from 0
 		private int[] indexes=null;
-		DoubleWritable readKey=new DoubleWritable();
-		Writable readValue;
+		private DoubleWritable readKey = new DoubleWritable();
+		private IntWritable readValue = new IntWritable();
 		private int numRead=0;
 		private boolean noRecordsNeeded=false;
-		
-		//to handle zeros
 		ReadWithZeros reader=null;
-		/*private boolean contain0s=false;
-		private boolean justFound0=false;
-		private DoubleWritable keyAfterZero;
-		private Writable valueAfterZero; 
-		private long numZeros=0;*/
 		
 		private int getIndexInTheArray(String name)
 		{
 			int i=name.indexOf("part-");
-			assert(i>=0);
 			return Integer.parseInt(name.substring(i+5));
 		}
 		
-		@SuppressWarnings("unchecked")
 		public PickRecordReader(JobConf job, FileSplit split)
-				throws IOException{
+			throws IOException
+		{
 			fs = FileSystem.get(job);
 	    	path = split.getPath();
-	    	totLength = split.getLength();
 	    	currentStream = fs.open(path);
 	    	int partIndex=getIndexInTheArray(path.getName());
 	    	String arrStr=job.get(SELECTED_POINTS_PREFIX+partIndex);
-	    	//System.out.println("read back in the recordreader: "+arrStr);
-	    	if(arrStr==null || arrStr.isEmpty())
-	    	{
+	    	if(arrStr==null || arrStr.isEmpty()) {
 	    		noRecordsNeeded=true;
 	    		return;
 	    	}
+	    	
 	    	String[] strs=arrStr.split(",");
 	    	pos=new int[strs.length];
 	    	indexes=new int[strs.length];
-	    	for(int i=0; i<strs.length; i++)
-	    	{
+	    	for(int i=0; i<strs.length; i++) {
 	    		String[] temp=strs[i].split(":");
 	    		pos[i]=Integer.parseInt(temp[0]);
 	    		indexes[i]=Integer.parseInt(temp[1]);
 	    	}
-	    //	Class<? extends WritableComparable> keyClass=(Class<? extends WritableComparable>) job.getClass(KEY_CLASS, WritableComparable.class);
-	    	Class<? extends Writable> valueClass=(Class<? extends Writable>) job.getClass(VALUE_CLASS, Writable.class);
-	    	try {
-	    	//	readKey=keyClass.newInstance();
-				readValue=valueClass.newInstance();
-			} catch (Exception e) {
-				throw new RuntimeException(e);
-			}
+	    	
 			valueIsWeight=job.getBoolean(VALUE_IS_WEIGHT, true);
 			
 			int part0=job.getInt(PARTITION_OF_ZERO, -1);
 			boolean contain0s=false;
 			long numZeros =0;
-	    	if(part0==partIndex)
-	    	{
+	    	if(part0==partIndex) {
 	    		contain0s = true;
 	    		numZeros = job.getLong(NUMBER_OF_ZERO, 0);
 	    	}
@@ -487,23 +429,17 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 		}
 		
 		public boolean next(MatrixIndexes key, MatrixCell value)
-		throws IOException {
-			
-			if(noRecordsNeeded || posIndex>=pos.length)
-			{
-				//System.out.println("return false");
-				//System.out.println("noRecordsNeeded="+noRecordsNeeded+", currentStream.getPos()="+currentStream.getPos()
-				//		+", totLength="+totLength+", posIndex="+posIndex+", pos.length="+pos.length);
+			throws IOException 
+		{
+			if(noRecordsNeeded || posIndex>=pos.length) {
 				return false;
 			}
 		
-			//System.out.println("numRead="+numRead+" pos["+posIndex+"]="+pos[posIndex]);
 			while(numRead<=pos[posIndex])
 			{
-				reader.readNextKeyValuePairs(readKey, (IntWritable)readValue);
-			//	System.out.println("**** numRead "+numRead+" -- "+readKey+": "+readValue);
+				reader.readNextKeyValuePairs(readKey, readValue);
 				if(valueIsWeight)
-					numRead+=((IntWritable)readValue).get();
+					numRead+=readValue.get();
 				else
 					numRead++;
 			}
@@ -511,14 +447,12 @@ public class PickFromCompactInputFormat extends FileInputFormat<MatrixIndexes, M
 			key.setIndexes(indexes[posIndex], 1);
 			value.setValue(readKey.get());
 			posIndex++;
-			//System.out.println("next: "+key+", "+value);
 			return true;
 		}
 
 		@Override
 		public void close() throws IOException {
-			currentStream.close();
-			
+			currentStream.close();			
 		}
 
 		@Override

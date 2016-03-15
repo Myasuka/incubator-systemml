@@ -213,7 +213,6 @@ public class ParForProgramBlock extends ForProgramBlock
 	public static final boolean ALLOW_NESTED_PARALLELISM	= true;    // if not, transparently change parfor to for on program conversions (local,remote)
 	public static       boolean ALLOW_REUSE_MR_JVMS         = true;    // potential benefits: less setup costs per task, NOTE> cannot be used MR4490 in Hadoop 1.0.3, still not fixed in 1.1.1
 	public static       boolean ALLOW_REUSE_MR_PAR_WORKER   = ALLOW_REUSE_MR_JVMS; //potential benefits: less initialization, reuse in-memory objects and result consolidation!
-	public static final boolean USE_FLEX_SCHEDULER_CONF     = false;
 	public static final boolean USE_PARALLEL_RESULT_MERGE   = false;    // if result merge is run in parallel or serial 
 	public static final boolean USE_PARALLEL_RESULT_MERGE_REMOTE = true; // if remote result merge should be run in parallel for multiple result vars
 	public static final boolean ALLOW_DATA_COLOCATION       = true;
@@ -1738,6 +1737,11 @@ public class ParForProgramBlock extends ForProgramBlock
 			//execute result merge in parallel for all result vars
 			int par = Math.min( _resultVars.size(), 
 					            InfrastructureAnalyzer.getLocalParallelism() );
+			if( InfrastructureAnalyzer.isLocalMode() ) {
+				int parmem = (int)Math.floor(OptimizerUtils.getLocalMemBudget() / 
+						InfrastructureAnalyzer.getRemoteMaxMemorySortBuffer());
+				par = Math.min(par, Math.max(parmem, 1)); //reduce k if necessary
+			}
 			
 			try
 			{
@@ -1749,13 +1753,16 @@ public class ParForProgramBlock extends ForProgramBlock
 				q.closeInput();
 				
 				//run result merge workers
-				Thread[] rmWorkers = new Thread[par];
+				ResultMergeWorker[] rmWorkers = new ResultMergeWorker[par];
 				for( int i=0; i<par; i++ )
-					rmWorkers[i] = new Thread(new ResultMergeWorker(q, results, ec));
+					rmWorkers[i] = new ResultMergeWorker(q, results, ec);
 				for( int i=0; i<par; i++ ) //start all
 					rmWorkers[i].start();
-				for( int i=0; i<par; i++ ) //wait for all
+				for( int i=0; i<par; i++ ) { //wait for all
 					rmWorkers[i].join();
+					if( !rmWorkers[i].finishedNoError() )
+						throw new DMLRuntimeException("Error occured in parallel result merge worker.");
+				}
 			}
 			catch(Exception ex)
 			{
@@ -2064,17 +2071,22 @@ public class ParForProgramBlock extends ForProgramBlock
 	/**
 	 * Helper class for parallel invocation of REMOTE_MR result merge for multiple variables.
 	 */
-	private class ResultMergeWorker implements Runnable
+	private class ResultMergeWorker extends Thread
 	{
 		private LocalTaskQueue<String> _q = null;
 		private LocalVariableMap[] _refVars = null;
 		private ExecutionContext _ec = null;
+		private boolean _success = false;
 		
 		public ResultMergeWorker( LocalTaskQueue<String> q, LocalVariableMap[] results, ExecutionContext ec )
 		{
 			_q = q;
 			_refVars = results;
 			_ec = ec;
+		}
+		
+		public boolean finishedNoError() {
+			return _success;
 		}
 		
 		@Override
@@ -2112,6 +2124,8 @@ public class ParForProgramBlock extends ForProgramBlock
 					//cleanup of intermediate result variables
 					cleanWorkerResultVariables( _ec, out, in );
 				}
+				
+				_success = true;
 			}
 			catch(Exception ex)
 			{

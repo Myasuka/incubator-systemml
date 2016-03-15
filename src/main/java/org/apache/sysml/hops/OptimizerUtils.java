@@ -23,7 +23,6 @@ import java.util.HashMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
 import org.apache.sysml.api.DMLScript;
 import org.apache.sysml.api.DMLScript.RUNTIME_PLATFORM;
 import org.apache.sysml.conf.ConfigurationManager;
@@ -32,6 +31,7 @@ import org.apache.sysml.hops.Hop.DataOpTypes;
 import org.apache.sysml.hops.Hop.FileFormatTypes;
 import org.apache.sysml.hops.Hop.OpOp2;
 import org.apache.sysml.hops.rewrite.HopRewriteUtils;
+import org.apache.sysml.lops.Checkpoint;
 import org.apache.sysml.lops.LopProperties.ExecType;
 import org.apache.sysml.runtime.DMLRuntimeException;
 import org.apache.sysml.runtime.controlprogram.LocalVariableMap;
@@ -42,6 +42,7 @@ import org.apache.sysml.runtime.instructions.cp.ScalarObject;
 import org.apache.sysml.runtime.matrix.MatrixCharacteristics;
 import org.apache.sysml.runtime.matrix.data.MatrixBlock;
 import org.apache.sysml.runtime.matrix.data.OutputInfo;
+import org.apache.sysml.runtime.matrix.data.SparseBlock;
 import org.apache.sysml.runtime.matrix.data.SparseRow;
 import org.apache.sysml.runtime.util.UtilFunctions;
 import org.apache.sysml.yarn.ropt.YarnClusterAnalyzer;
@@ -73,7 +74,10 @@ public class OptimizerUtils
 	public static final double BIT_SIZE = (double)1/8;
 	public static final double INVALID_SIZE = -1d; // memory estimate not computed
 
+	//constants for valid CP matrix dimension sizes / nnz (dense/sparse)
 	public static final long MAX_NUMCELLS_CP_DENSE = Integer.MAX_VALUE;
+	public static final long MAX_NNZ_CP_SPARSE = (MatrixBlock.DEFAULT_SPARSEBLOCK == 
+			SparseBlock.Type.MCSR) ? Long.MAX_VALUE : Integer.MAX_VALUE;
 	
 	/**
 	 * Enables/disables dynamic re-compilation of lops/instructions.
@@ -102,6 +106,13 @@ public class OptimizerUtils
 	 */
 	public static boolean ALLOW_COMMON_SUBEXPRESSION_ELIMINATION = true;
 
+	/**
+	 * Enables common subexpression elimination in dags for persistent reads based on filenames
+	 * and other relevant read meta data. Disabled for jmlc to allow binding of in-memory objects
+	 * without specifying read properties.
+	 */
+	public static boolean ALLOW_CSE_PERSISTENT_READS = ALLOW_COMMON_SUBEXPRESSION_ELIMINATION && true;
+	
 	/**
 	 * Enables constant folding in dags. Constant folding computes simple expressions of binary 
 	 * operations and literals and replaces the hop sub-DAG with a new literal operator. 
@@ -505,6 +516,16 @@ public class OptimizerUtils
 	}
 	
 	/**
+	 * 
+	 * @param mcIn
+	 * @return
+	 */
+	public static boolean checkSparseBlockCSRConversion( MatrixCharacteristics mcIn ) {
+		return Checkpoint.CHECKPOINT_SPARSE_CSR
+			&& OptimizerUtils.getSparsity(mcIn) < MatrixBlock.SPARSITY_TURN_POINT;
+	}
+	
+	/**
 	 * Returns the number of reducers that potentially run in parallel.
 	 * This is either just the configured value (SystemML config) or
 	 * the minimum of configured value and available reduce slots. 
@@ -862,8 +883,8 @@ public class OptimizerUtils
 		
 		if( sparse ) //SPARSE
 		{
-			//check max nnz
-			ret = (nnz <= Long.MAX_VALUE);
+			//check max nnz (dependent on sparse block format)
+			ret = (nnz <= MAX_NNZ_CP_SPARSE);
 		}
 		else //DENSE
 		{
@@ -1100,6 +1121,10 @@ public class OptimizerUtils
 		}
 		
 		return ret; 
+	}
+	
+	public static double getSparsity( MatrixCharacteristics mc ) {
+		return getSparsity(mc.getRows(), mc.getCols(), mc.getNonZeros());
 	}
 	
 	public static double getSparsity( long dim1, long dim2, long nnz )

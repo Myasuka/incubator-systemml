@@ -31,19 +31,22 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.wink.json4j.JSONArray;
 import org.apache.wink.json4j.JSONObject;
-
 import org.apache.sysml.conf.ConfigurationManager;
 import org.apache.sysml.hops.DataGenOp;
 import org.apache.sysml.parser.LanguageException.LanguageErrorCodes;
+import org.apache.sysml.runtime.controlprogram.parfor.stat.InfrastructureAnalyzer;
 import org.apache.sysml.runtime.util.LocalFileUtils;
+import org.apache.sysml.runtime.util.MapReduceTool;
 import org.apache.sysml.runtime.util.UtilFunctions;
 import org.apache.sysml.utils.JSONHelper;
 
 
 public class DataExpression extends DataIdentifier 
 {
-
-	public static boolean REJECT_READ_UNKNOWN_SIZE = true;
+	//internal configuration (modified by mlcontext, jmlc apis) 
+	//no read of meta data on mlcontext (local) /jmlc (global); ignore unknowns on jmlc
+	public static boolean IGNORE_READ_WRITE_METADATA = false; // global skip meta data reads
+	public static boolean REJECT_READ_WRITE_UNKNOWNS = true;  // ignore missing meta data
 	
 	public static final String RAND_ROWS 	=  "rows";	 
 	public static final String RAND_COLS 	=  "cols";
@@ -75,8 +78,9 @@ public class DataExpression extends DataIdentifier
 	public static final String COLUMNBLOCKCOUNTPARAM = "cols_in_block";
 	public static final String DATATYPEPARAM = "data_type";
 	public static final String VALUETYPEPARAM = "value_type";
-	public static final String DESCRIPTIONPARAM = "description"; 
-	
+	public static final String DESCRIPTIONPARAM = "description";
+	public static final String AUTHORPARAM = "author";
+
 	// Parameter names relevant to reading/writing delimited/csv files
 	public static final String DELIM_DELIMITER = "sep";
 	public static final String DELIM_HAS_HEADER_ROW = "header";
@@ -119,14 +123,15 @@ public class DataExpression extends DataIdentifier
 	private DataOp _opcode;
 	private HashMap<String, Expression> _varParams;
 	private boolean _strInit = false; //string initialize
-	
-	private boolean checkMetadata = true;
-	public void setCheckMetadata(boolean checkMetadata) {
-		this.checkMetadata = checkMetadata;
-	}
+	private boolean _checkMetadata = true; // local skip meta data reads
 
 	public DataExpression(){
 		//do nothing
+	}
+
+	
+	public void setCheckMetadata(boolean checkMetadata) {
+		_checkMetadata = checkMetadata;
 	}
 	
 	public static DataExpression getDataExpression(String functionName, ArrayList<ParameterExpression> passedParamExprs, 
@@ -468,8 +473,6 @@ public class DataExpression extends DataIdentifier
 		return _varParams.get(name);
 	}
 
-	
-	
 	public void addVarParam(String name, Expression value){
 		_varParams.put(name, value);
 		
@@ -486,7 +489,7 @@ public class DataExpression extends DataIdentifier
 		_varParams.remove(name);
 	}
 	
-	private String processInputFileName(HashMap<String, ConstIdentifier> currConstVars, boolean conditional) 
+	private String getInputFileName(HashMap<String, ConstIdentifier> currConstVars, boolean conditional) 
 		throws LanguageException 
 	{
 		String filename = null;
@@ -615,15 +618,23 @@ public class DataExpression extends DataIdentifier
 			JSONObject configObject = null;	
 
 			// Process expressions in input filename
-			String inputFileName = processInputFileName(currConstVars, conditional);
+			String inputFileName = getInputFileName(currConstVars, conditional);
 			
 			// Obtain and validate metadata filename
 			String mtdFileName = getMTDFileName(inputFileName);
-			
 
 			// track whether should attempt to read MTD file or not
-			boolean shouldReadMTD = checkMetadata;
-			
+			boolean shouldReadMTD = _checkMetadata && !IGNORE_READ_WRITE_METADATA;
+
+			// Check for file existence (before metadata parsing for meaningful error messages)
+			if( shouldReadMTD //skip check for jmlc/mlcontext
+				&& !MapReduceTool.existsFileOnHDFS(inputFileName)) 
+			{
+				String fsext = InfrastructureAnalyzer.isLocalMode() ? "FS (local mode)" : "HDFS";
+				raiseValidateError("Read input file does not exist on "+fsext+": " + 
+						inputFileName, conditional, LanguageErrorCodes.INVALID_PARAMETERS);								
+			}
+
 			// track whether format type has been inferred 
 			boolean inferredFormatType = false;
 			
@@ -645,7 +656,7 @@ public class DataExpression extends DataIdentifier
 			}
 			
 			// check if file is delimited format
-			if (formatTypeString == null) {
+			if (formatTypeString == null && shouldReadMTD ) {
 				boolean isDelimitedFormat = checkHasDelimitedFormat(inputFileName, conditional); 
 				
 				if (isDelimitedFormat){
@@ -883,19 +894,22 @@ public class DataExpression extends DataIdentifier
 				// initialize size of target data identifier to UNKNOWN
 				getOutput().setDimensions(-1, -1);
 				
-				if ( !isCSV && (getVarParam(READROWPARAM) == null || getVarParam(READCOLPARAM) == null)){
-					raiseValidateError("Missing or incomplete dimension information in read statement: " + mtdFileName, conditional, LanguageErrorCodes.INVALID_PARAMETERS);				
+				if ( !isCSV && REJECT_READ_WRITE_UNKNOWNS //skip check for csv format / jmlc api
+					&& (getVarParam(READROWPARAM) == null || getVarParam(READCOLPARAM) == null) ) {
+						raiseValidateError("Missing or incomplete dimension information in read statement: " 
+								+ mtdFileName, conditional, LanguageErrorCodes.INVALID_PARAMETERS);				
 				}
-				if (getVarParam(READROWPARAM) instanceof ConstIdentifier && getVarParam(READCOLPARAM) instanceof ConstIdentifier)  {
 				
+				if (getVarParam(READROWPARAM) instanceof ConstIdentifier 
+					&& getVarParam(READCOLPARAM) instanceof ConstIdentifier)  
+				{
 					// these are strings that are long values
 					Long dim1 = (getVarParam(READROWPARAM) == null) ? null : Long.valueOf( getVarParam(READROWPARAM).toString());
-					Long dim2 = (getVarParam(READCOLPARAM) == null) ? null : Long.valueOf( getVarParam(READCOLPARAM).toString());
-					
-					if ( !isCSV && (dim1 <= 0 || dim2 <= 0) && REJECT_READ_UNKNOWN_SIZE )
-					{
+					Long dim2 = (getVarParam(READCOLPARAM) == null) ? null : Long.valueOf( getVarParam(READCOLPARAM).toString());					
+					if ( !isCSV && (dim1 <= 0 || dim2 <= 0) && REJECT_READ_WRITE_UNKNOWNS ) {
 						raiseValidateError("Invalid dimension information in read statement", conditional, LanguageErrorCodes.INVALID_PARAMETERS);
 					}
+					
 					// set dim1 and dim2 values 
 					if (dim1 != null && dim2 != null){
 						getOutput().setDimensions(dim1, dim2);

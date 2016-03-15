@@ -56,7 +56,7 @@ import org.apache.sysml.runtime.util.DataConverter;
  * 
  * NOTES: 
  *   * Currently fused API and implementation in order to reduce complexity. 
- *   * See SystemTMulticlassSVMScoreTest for an usage example. 
+ *   * See JUnit test cases (org.apache.sysml.test.integration.functions.jmlc) for examples. 
  */
 public class Connection 
 {
@@ -70,8 +70,13 @@ public class Connection
 	public Connection()
 	{
 		//setup basic parameters for embedded execution
-		DataExpression.REJECT_READ_UNKNOWN_SIZE = false;
+		//parser parameters
+		AParserWrapper.IGNORE_UNSPECIFIED_ARGS = true;
+		DataExpression.IGNORE_READ_WRITE_METADATA = true;
+		DataExpression.REJECT_READ_WRITE_UNKNOWNS = false;
+		//runtime parameters
 		DMLScript.rtplatform = RUNTIME_PLATFORM.SINGLE_NODE;
+		OptimizerUtils.ALLOW_CSE_PERSISTENT_READS = false;
 		OptimizerUtils.PARALLEL_CP_READ_TEXTFORMATS = false;
 		OptimizerUtils.PARALLEL_CP_WRITE_TEXTFORMATS = false;
 		OptimizerUtils.PARALLEL_CP_READ_BINARYFORMATS = false;
@@ -156,7 +161,16 @@ public class Connection
 	 */
 	public void close()
 	{
-		
+		//reset parameters for embedded execution
+		AParserWrapper.IGNORE_UNSPECIFIED_ARGS = false;
+		DataExpression.IGNORE_READ_WRITE_METADATA = false;
+		DataExpression.REJECT_READ_WRITE_UNKNOWNS = true;
+		OptimizerUtils.ALLOW_CSE_PERSISTENT_READS = 
+				OptimizerUtils.ALLOW_COMMON_SUBEXPRESSION_ELIMINATION;
+		OptimizerUtils.PARALLEL_CP_READ_TEXTFORMATS = true;
+		OptimizerUtils.PARALLEL_CP_WRITE_TEXTFORMATS = true;
+		OptimizerUtils.PARALLEL_CP_READ_BINARYFORMATS = true;
+		OptimizerUtils.PARALLEL_CP_WRITE_BINARYFORMATS = true;		
 	}
 	
 	/**

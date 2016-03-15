@@ -83,6 +83,9 @@ public class CPInstructionParser extends InstructionParser
 		String2CPInstructionType.put( "uamean"  , CPINSTRUCTION_TYPE.AggregateUnary);
 		String2CPInstructionType.put( "uarmean" , CPINSTRUCTION_TYPE.AggregateUnary);
 		String2CPInstructionType.put( "uacmean" , CPINSTRUCTION_TYPE.AggregateUnary);
+		String2CPInstructionType.put( "uavar"   , CPINSTRUCTION_TYPE.AggregateUnary);
+		String2CPInstructionType.put( "uarvar"  , CPINSTRUCTION_TYPE.AggregateUnary);
+		String2CPInstructionType.put( "uacvar"  , CPINSTRUCTION_TYPE.AggregateUnary);
 		String2CPInstructionType.put( "uamax"   , CPINSTRUCTION_TYPE.AggregateUnary);
 		String2CPInstructionType.put( "uarmax"  , CPINSTRUCTION_TYPE.AggregateUnary);
 		String2CPInstructionType.put( "uarimax", CPINSTRUCTION_TYPE.AggregateUnary);
@@ -164,6 +167,7 @@ public class CPInstructionParser extends InstructionParser
 		String2CPInstructionType.put( "ucummax", CPINSTRUCTION_TYPE.BuiltinUnary);
 		String2CPInstructionType.put( "stop"  , CPINSTRUCTION_TYPE.BuiltinUnary);
 		String2CPInstructionType.put( "inverse", CPINSTRUCTION_TYPE.BuiltinUnary);
+		String2CPInstructionType.put( "cholesky",CPINSTRUCTION_TYPE.BuiltinUnary);
 		String2CPInstructionType.put( "sprop", CPINSTRUCTION_TYPE.BuiltinUnary);
 		String2CPInstructionType.put( "sigmoid", CPINSTRUCTION_TYPE.BuiltinUnary);
 		String2CPInstructionType.put( "sel+", CPINSTRUCTION_TYPE.BuiltinUnary);
@@ -177,6 +181,7 @@ public class CPInstructionParser extends InstructionParser
 		String2CPInstructionType.put( "replace"	    , CPINSTRUCTION_TYPE.ParameterizedBuiltin);
 		String2CPInstructionType.put( "rexpand"	    , CPINSTRUCTION_TYPE.ParameterizedBuiltin);
 		String2CPInstructionType.put( "transform"	, CPINSTRUCTION_TYPE.ParameterizedBuiltin);
+		String2CPInstructionType.put( "transformapply",CPINSTRUCTION_TYPE.ParameterizedBuiltin);
 
 		// Variable Instruction Opcodes 
 		String2CPInstructionType.put( "assignvar"   , CPINSTRUCTION_TYPE.Variable);
@@ -196,6 +201,7 @@ public class CPInstructionParser extends InstructionParser
 
 		// Reorg Instruction Opcodes (repositioning of existing values)
 		String2CPInstructionType.put( "r'"   	    , CPINSTRUCTION_TYPE.Reorg);
+		String2CPInstructionType.put( "rev"   	    , CPINSTRUCTION_TYPE.Reorg);
 		String2CPInstructionType.put( "rdiag"       , CPINSTRUCTION_TYPE.Reorg);
 		String2CPInstructionType.put( "rshape"      , CPINSTRUCTION_TYPE.MatrixReshape);
 		String2CPInstructionType.put( "rsort"      , CPINSTRUCTION_TYPE.Reorg);

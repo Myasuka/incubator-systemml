@@ -237,6 +237,8 @@ public class BuiltinFunctionExpression extends DataIdentifier
 		case COLMAX:
 		case COLMIN:
 		case COLMEAN:
+		case COLSD:
+		case COLVAR:
 			// colSums(X);
 			checkNumParameters(1);
 			checkMatrixParam(getFirstExpr());
@@ -251,6 +253,8 @@ public class BuiltinFunctionExpression extends DataIdentifier
 		case ROWMIN:
 		case ROWINDEXMIN:
 		case ROWMEAN:
+		case ROWSD:
+		case ROWVAR:
 			//rowSums(X);
 			checkNumParameters(1);
 			checkMatrixParam(getFirstExpr());
@@ -262,6 +266,8 @@ public class BuiltinFunctionExpression extends DataIdentifier
 		case SUM:
 		case PROD:
 		case TRACE:
+		case SD:
+		case VAR:
 			// sum(X);
 			checkNumParameters(1);
 			checkMatrixParam(getFirstExpr());
@@ -480,6 +486,16 @@ public class BuiltinFunctionExpression extends DataIdentifier
 			output.setBlockDimensions (id.getColumnsInBlock(), id.getRowsInBlock());
 			output.setValueType(id.getValueType());
 			break;
+		
+		case REV:
+			checkNumParameters(1);
+			checkMatrixParam(getFirstExpr());
+			output.setDataType(DataType.MATRIX);
+			output.setDimensions(id.getDim1(), id.getDim2());
+			output.setBlockDimensions (id.getColumnsInBlock(), id.getRowsInBlock());
+			output.setValueType(id.getValueType());
+			break;	
+			
 		case DIAG:
 			checkNumParameters(1);
 			checkMatrixParam(getFirstExpr());
@@ -933,6 +949,24 @@ public class BuiltinFunctionExpression extends DataIdentifier
 			output.setDimensions(in.getDim1(), in.getDim2());
 			output.setBlockDimensions(in.getRowsInBlock(), in.getColumnsInBlock());
 			break;
+		
+		case CHOLESKY:
+		{
+			// A = L%*%t(L) where L is the lower triangular matrix
+			checkNumParameters(1);
+			checkMatrixParam(getFirstExpr());
+
+			output.setDataType(DataType.MATRIX);
+			output.setValueType(ValueType.DOUBLE);
+			
+			Identifier inA = getFirstExpr().getOutput();
+			if(inA.dimsKnown() && inA.getDim1() != inA.getDim2()) 
+				raiseValidateError("Input to cholesky() must be square matrix -- given: a " + inA.getDim1() + "x" + inA.getDim2() + " matrix.", conditional);
+			
+			output.setDimensions(inA.getDim1(), inA.getDim2());
+			output.setBlockDimensions(inA.getRowsInBlock(), inA.getColumnsInBlock());
+			break;
+		}	
 			
 		case OUTER:
 			Identifier id2 = this.getSecondExpr().getOutput();
@@ -1309,10 +1343,16 @@ public class BuiltinFunctionExpression extends DataIdentifier
 			bifop = Expression.BuiltinFunctionOp.SUM;
 		else if (functionName.equals("mean"))
 			bifop = Expression.BuiltinFunctionOp.MEAN;
+		else if (functionName.equals("sd"))
+			bifop = Expression.BuiltinFunctionOp.SD;
+		else if (functionName.equals("var"))
+			bifop = Expression.BuiltinFunctionOp.VAR;
 		else if (functionName.equals("trace"))
 			bifop = Expression.BuiltinFunctionOp.TRACE;
 		else if (functionName.equals("t"))
 			 bifop = Expression.BuiltinFunctionOp.TRANS;
+		else if (functionName.equals("rev"))
+			 bifop = Expression.BuiltinFunctionOp.REV;		
 		else if (functionName.equals("cbind") || functionName.equals("append"))
 			bifop = Expression.BuiltinFunctionOp.CBIND;
 		else if (functionName.equals("rbind"))
@@ -1341,6 +1381,14 @@ public class BuiltinFunctionExpression extends DataIdentifier
 			bifop = Expression.BuiltinFunctionOp.ROWMEAN;
 		else if (functionName.equals("colMeans"))
 			 bifop = Expression.BuiltinFunctionOp.COLMEAN;
+		else if (functionName.equals("rowSds"))
+			bifop = Expression.BuiltinFunctionOp.ROWSD;
+		else if (functionName.equals("colSds"))
+			bifop = Expression.BuiltinFunctionOp.COLSD;
+		else if (functionName.equals("rowVars"))
+			bifop = Expression.BuiltinFunctionOp.ROWVAR;
+		else if (functionName.equals("colVars"))
+			bifop = Expression.BuiltinFunctionOp.COLVAR;
 		else if (functionName.equals("cummax"))
 			 bifop = Expression.BuiltinFunctionOp.CUMMAX;
 		else if (functionName.equals("cummin"))
@@ -1394,6 +1442,8 @@ public class BuiltinFunctionExpression extends DataIdentifier
 			bifop = Expression.BuiltinFunctionOp.MEDIAN;
 		else if (functionName.equals("inv"))
 			bifop = Expression.BuiltinFunctionOp.INVERSE;
+		else if (functionName.equals("cholesky"))
+			bifop = Expression.BuiltinFunctionOp.CHOLESKY;
 		else if (functionName.equals("sample"))
 			bifop = Expression.BuiltinFunctionOp.SAMPLE;
 		else if ( functionName.equals("outer") )

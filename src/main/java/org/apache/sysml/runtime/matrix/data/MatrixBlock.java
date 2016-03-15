@@ -29,13 +29,10 @@ import java.io.ObjectOutput;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Iterator;
-import java.util.Map;
 
 import org.apache.commons.math3.random.Well1024a;
 import org.apache.hadoop.io.DataInputBuffer;
-
 import org.apache.sysml.conf.ConfigurationManager;
 import org.apache.sysml.conf.DMLConfig;
 import org.apache.sysml.hops.Hop.OpOp2;
@@ -47,6 +44,7 @@ import org.apache.sysml.parser.DMLTranslator;
 import org.apache.sysml.runtime.DMLRuntimeException;
 import org.apache.sysml.runtime.DMLUnsupportedOperationException;
 import org.apache.sysml.runtime.functionobjects.Builtin;
+import org.apache.sysml.runtime.functionobjects.CM;
 import org.apache.sysml.runtime.functionobjects.CTable;
 import org.apache.sysml.runtime.functionobjects.DiagIndex;
 import org.apache.sysml.runtime.functionobjects.Divide;
@@ -58,6 +56,7 @@ import org.apache.sysml.runtime.functionobjects.Plus;
 import org.apache.sysml.runtime.functionobjects.ReduceAll;
 import org.apache.sysml.runtime.functionobjects.ReduceCol;
 import org.apache.sysml.runtime.functionobjects.ReduceRow;
+import org.apache.sysml.runtime.functionobjects.RevIndex;
 import org.apache.sysml.runtime.functionobjects.SortIndex;
 import org.apache.sysml.runtime.functionobjects.SwapIndex;
 import org.apache.sysml.runtime.instructions.cp.CM_COV_Object;
@@ -73,6 +72,7 @@ import org.apache.sysml.runtime.matrix.operators.AggregateOperator;
 import org.apache.sysml.runtime.matrix.operators.AggregateUnaryOperator;
 import org.apache.sysml.runtime.matrix.operators.BinaryOperator;
 import org.apache.sysml.runtime.matrix.operators.CMOperator;
+import org.apache.sysml.runtime.matrix.operators.CMOperator.AggregateOperationTypes;
 import org.apache.sysml.runtime.matrix.operators.COVOperator;
 import org.apache.sysml.runtime.matrix.operators.Operator;
 import org.apache.sysml.runtime.matrix.operators.QuaternaryOperator;
@@ -88,13 +88,14 @@ import org.apache.sysml.runtime.util.UtilFunctions;
 
 public class MatrixBlock extends MatrixValue implements Externalizable
 {
-
 	private static final long serialVersionUID = 7319972089143154056L;
 	
 	//sparsity nnz threshold, based on practical experiments on space consumption and performance
 	public static final double SPARSITY_TURN_POINT = 0.4;
 	//sparsity threshold for ultra-sparse matrix operations (40nnz in a 1kx1k block)
 	public static final double ULTRA_SPARSITY_TURN_POINT = 0.00004; 
+	//default sparse block type: modified compressed sparse rows 
+	public static final SparseBlock.Type DEFAULT_SPARSEBLOCK = SparseBlock.Type.MCSR;
 	//basic header (int rlen, int clen, byte type)
 	public static final int HEADER_SIZE = 9;
 	
@@ -113,7 +114,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	
 	//matrix data (sparse or dense)
 	protected double[] denseBlock    = null;
-	protected SparseRow[] sparseRows = null;
+	protected SparseBlock sparseBlock = null;
 		
 	//sparse-block-specific attributes (allocation only)
 	protected int estimatedNNzsPerRow = -1; 
@@ -174,6 +175,22 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		this.copy(that);
 	}
 	
+	public MatrixBlock(MatrixBlock that, SparseBlock.Type stype, boolean deep)
+	{
+		//sanity check sparse matrix block
+		if( !that.isInSparseFormat() )
+			throw new RuntimeException("Sparse matrix block expected.");
+		
+		//deep copy and change sparse block type
+		rlen = that.rlen;
+		clen = that.clen;
+		sparse = that.sparse;
+		nonZeros = that.nonZeros;
+		estimatedNNzsPerRow = that.estimatedNNzsPerRow;
+		sparseBlock = SparseBlockFactory
+				.copySparseBlock(stype, that.sparseBlock, deep);
+	}
+	
 	////////
 	// Initialization methods
 	// (reset, init, allocate, etc)
@@ -222,25 +239,19 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		reset(estnnzs);
 	}
 		
-	public void reset(int rl, int cl, boolean sp)
-	{
+	public void reset(int rl, int cl, boolean sp) {
 		sparse=sp;
 		reset(rl, cl);
 	}
 	
-	public void reset(int rl, int cl, boolean sp, long estnnzs)
-	{
+	public void reset(int rl, int cl, boolean sp, long estnnzs) {
 		sparse=sp;
 		reset(rl, cl, estnnzs);
 	}
 	
-	public void resetSparse()
-	{
-		if(sparseRows!=null)
-		{
-			for(int i=0; i<Math.min(rlen, sparseRows.length); i++)
-				if(sparseRows[i]!=null)
-					sparseRows[i].reset(estimatedNNzsPerRow, clen);
+	public void resetSparse() {
+		if(sparseBlock != null) {
+			sparseBlock.reset(estimatedNNzsPerRow, clen);
 		}
 	}
 	
@@ -369,7 +380,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	public boolean isAllocated()
 	{
 		if( sparse )
-			return (sparseRows!=null);
+			return (sparseBlock!=null);
 		else
 			return (denseBlock!=null);
 	}
@@ -387,8 +398,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	/**
 	 * 
 	 */
-	public void allocateDenseOrSparseBlock()
-	{
+	public void allocateDenseOrSparseBlock() {
 		if( sparse )
 			allocateSparseRowsBlock();
 		else
@@ -425,8 +435,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	/**
 	 * 
 	 */
-	public void allocateSparseRowsBlock()
-	{
+	public void allocateSparseRowsBlock() {
 		allocateSparseRowsBlock(true);
 	}
 	
@@ -436,16 +445,9 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	 */
 	public void allocateSparseRowsBlock(boolean clearNNZ)
 	{	
-		//allocate block if non-existing or too small (guaranteed to be 0-initialized),
-		if( sparseRows == null ) {
-			sparseRows=new SparseRow[rlen];
-		}
-		else if( sparseRows.length < rlen ) {
-			SparseRow[] oldSparseRows=sparseRows;
-			sparseRows = new SparseRow[rlen];
-			for(int i=0; i<Math.min(oldSparseRows.length, rlen); i++) {
-				sparseRows[i]=oldSparseRows[i];
-			}
+		//allocate block if non-existing or too small (guaranteed to be 0-initialized)
+		if( sparseBlock == null || sparseBlock.numRows()<rlen ) {
+			sparseBlock = SparseBlockFactory.createSparseBlock(DEFAULT_SPARSEBLOCK, rlen);
 		}
 		
 		//clear nnz if necessary
@@ -482,19 +484,17 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	 * from non-empty blocks would significantly increase the total memory consumption.
 	 * 
 	 */
-	public void cleanupBlock( boolean dense, boolean sparse )
-	{
+	public void cleanupBlock( boolean dense, boolean sparse ) {
 		if(dense)
 			denseBlock = null;
 		if(sparse)
-			sparseRows = null;
+			sparseBlock = null;
 	}
 	
 	////////
 	// Metadata information 
 	
-	public int getNumRows()
-	{
+	public int getNumRows() {
 		return rlen;
 	}
 	
@@ -504,23 +504,19 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	 * 
 	 * @param _r
 	 */
-	public void setNumRows(int r) 
-	{
+	public void setNumRows(int r) {
 		rlen = r;
 	}
 	
-	public int getNumColumns()
-	{
+	public int getNumColumns() {
 		return clen;
 	}
 	
-	public void setNumColumns(int c) 
-	{
+	public void setNumColumns(int c) {
 		clen = c;
 	}
 	
-	public long getNonZeros()
-	{
+	public long getNonZeros() {
 		return nonZeros;
 	}
 	
@@ -528,8 +524,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		nonZeros = nnz;
 	}
 	
-	public boolean isVector() 
-	{
+	public boolean isVector() {
 		return (rlen == 1 || clen == 1);
 	}
 	
@@ -538,16 +533,14 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	 * Return the maximum row encountered WITHIN the current block
 	 *  
 	 */
-	public int getMaxRow() 
-	{
+	public int getMaxRow() {
 		if (!sparse) 
 			return getNumRows();
 		else 
 			return maxrow;
 	}
 	
-	public void setMaxRow(int r)
-	{
+	public void setMaxRow(int r) {
 		maxrow = r;
 	}
 	
@@ -556,27 +549,23 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	 * Return the maximum column encountered WITHIN the current block
 	 * 
 	 */
-	public int getMaxColumn() 
-	{
+	public int getMaxColumn() {
 		if (!sparse) 
 			return getNumColumns();
 		else 
 			return maxcolumn;
 	}
 	
-	public void setMaxColumn(int c) 
-	{
+	public void setMaxColumn(int c) {
 		maxcolumn = c;
 	}
 	
 	@Override
-	public boolean isEmpty()
-	{
+	public boolean isEmpty() {
 		return isEmptyBlock(false);
 	}
 	
-	public boolean isEmptyBlock()
-	{
+	public boolean isEmptyBlock() {
 		return isEmptyBlock(true);
 	}
 	
@@ -584,7 +573,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	public boolean isEmptyBlock(boolean safe)
 	{
 		boolean ret = false;
-		if( sparse && sparseRows==null )
+		if( sparse && sparseBlock==null )
 			ret = true;
 		else if( !sparse && denseBlock==null ) 	
 			ret = true;
@@ -598,231 +587,86 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		return ret;
 	}
 	
-	public void setDiag()
-	{
+	public void setDiag() {
 		diag = true;
 	}
 	
-	public boolean isDiag()
-	{
+	public boolean isDiag() {
 		return diag;
 	}
 	
 	////////
 	// Data handling
 	
-	public double[] getDenseArray()
-	{
-		if(sparse)
+	public double[] getDenseBlock() {
+		if( sparse )
 			return null;
 		return denseBlock;
 	}
 	
-	public SparseRow[] getSparseRows()
-	{
-		if(!sparse)
+	public SparseBlock getSparseBlock() {
+		if( !sparse )
 			return null;
-		return sparseRows;
+		return sparseBlock;
 	}
 	
-	public SparseRowsIterator getSparseRowsIterator()
-	{
+	/**
+	 * 
+	 * @return
+	 */
+	public Iterator<IJV> getSparseBlockIterator() {
 		//check for valid format, should have been checked from outside
 		if( !sparse )
-			throw new RuntimeException("getSparseCellInterator should not be called for dense format");
+			throw new RuntimeException("getSparseBlockInterator should not be called for dense format");
 		
-		return new SparseRowsIterator(rlen, sparseRows);
+		//check for existing sparse block: return empty list
+		if( sparseBlock==null )
+			return new ArrayList<IJV>().iterator();
+		
+		//get iterator over sparse block
+		if( rlen == sparseBlock.numRows() )
+			return sparseBlock.getIterator();
+		else
+			return sparseBlock.getIterator(rlen);
 	}
 	
-	public SparseRowsIterator getSparseRowsIterator(int rl, int ru)
-	{
+	/**
+	 * 
+	 * @param rl
+	 * @param ru
+	 * @return
+	 */
+	public Iterator<IJV> getSparseBlockIterator(int rl, int ru) {
 		//check for valid format, should have been checked from outside
 		if( !sparse )
-			throw new RuntimeException("getSparseCellInterator should not be called for dense format");
+			throw new RuntimeException("getSparseBlockInterator should not be called for dense format");
 		
-		return new SparseRowsIterator(rl, ru, sparseRows);
-	}
-	
-	@Override
-	public void getCellValues(Collection<Double> ret) 
-	{
-		int limit=rlen*clen;
-		if(sparse)
-		{
-			if(sparseRows==null)
-			{
-				for(int i=0; i<limit; i++)
-					ret.add(0.0);
-			}else
-			{
-				for(int r=0; r<Math.min(rlen, sparseRows.length); r++)
-				{
-					if(sparseRows[r]==null) 
-						continue;
-					double[] container=sparseRows[r].getValueContainer();
-					for(int j=0; j<sparseRows[r].size(); j++)
-						ret.add(container[j]);
-				}
-				int zeros=limit-ret.size();
-				for(int i=0; i<zeros; i++)
-					ret.add(0.0);
-			}
-		}else
-		{
-			if(denseBlock==null)
-			{
-				for(int i=0; i<limit; i++)
-					ret.add(0.0);
-			}else
-			{
-				for(int i=0; i<limit; i++)
-					ret.add(denseBlock[i]);
-			}
-		}
-	}
-
-	@Override
-	public void getCellValues(Map<Double, Integer> ret) 
-	{
-		int limit=rlen*clen;
-		if(sparse)
-		{
-			if(sparseRows==null)
-			{
-				ret.put(0.0, limit);
-			}else
-			{
-				for(int r=0; r<Math.min(rlen, sparseRows.length); r++)
-				{
-					if(sparseRows[r]==null) 
-						continue;
-					double[] container=sparseRows[r].getValueContainer();
-					for(int j=0; j<sparseRows[r].size(); j++)
-					{
-						Double v=container[j];
-						Integer old=ret.get(v);
-						if(old!=null)
-							ret.put(v, old+1);
-						else
-							ret.put(v, 1);
-					}
-				}
-				int zeros=limit-ret.size();
-				Integer old=ret.get(0.0);
-				if(old!=null)
-					ret.put(0.0, old+zeros);
-				else
-					ret.put(0.0, zeros);
-			}
-			
-		}else
-		{
-			if(denseBlock==null)
-			{
-				ret.put(0.0, limit);
-			}else
-			{
-				for(int i=0; i<limit; i++)
-				{
-					double v=denseBlock[i];
-					Integer old=ret.get(v);
-					if(old!=null)
-						ret.put(v, old+1);
-					else
-						ret.put(v, 1);
-				}	
-			}
-		}
+		//check for existing sparse block: return empty list
+		if( sparseBlock==null )
+			return new ArrayList<IJV>().iterator();
+		
+		//get iterator over sparse block
+		return sparseBlock.getIterator(rl, ru);
 	}
 	
 	@Override
 	public double getValue(int r, int c) 
 	{
-		if(r>rlen || c > clen)
+		//matrix bounds check 
+		if( r>rlen || c > clen )
 			throw new RuntimeException("indexes ("+r+","+c+") out of range ("+rlen+","+clen+")");
 		
-		if(sparse)
-		{
-			if(sparseRows==null || sparseRows.length<=r || sparseRows[r]==null)
-				return 0;
-			return sparseRows[r].get(c);
-		}else
-		{
-			if(denseBlock==null)
-				return 0;
-			return denseBlock[r*clen+c]; 
-		}
+		return quickGetValue(r, c);
 	}
 	
 	@Override
 	public void setValue(int r, int c, double v) 
 	{
-		if(r>rlen || c > clen)
+		//matrix bounds check 
+		if( r>rlen || c > clen )
 			throw new RuntimeException("indexes ("+r+","+c+") out of range ("+rlen+","+clen+")");
-		if(sparse)
-		{
-			if( (sparseRows==null || sparseRows.length<=r || sparseRows[r]==null) && v==0.0)
-				return;
-			//allocation on demand
-			allocateSparseRowsBlock(false);
-			if(sparseRows[r]==null)
-				sparseRows[r]=new SparseRow(estimatedNNzsPerRow, clen);
-			
-			if(sparseRows[r].set(c, v))
-				nonZeros++;
-			
-		}else
-		{
-			if(denseBlock==null && v==0.0)
-				return;
 
-			//allocate and init dense block (w/o overwriting nnz)
-			allocateDenseBlock(false);
-				
-			int index=r*clen+c;
-			if(denseBlock[index]==0)
-				nonZeros++;
-			denseBlock[index]=v;
-			if(v==0)
-				nonZeros--;
-		}
-		
-	}
-	
-	@Override
-	public void setValue(CellIndex index, double v) 
-	{
-		setValue(index.row, index.column, v);
-	}
-	
-	@Override
-	/**
-	 * If (r,c) \in Block, add v to existing cell
-	 * If not, add a new cell with index (r,c).
-	 * 
-	 * This function intentionally avoids the maintenance of NNZ for efficiency. 
-	 * 
-	 */
-	public void addValue(int r, int c, double v) {
-		if(sparse)
-		{
-			//allocation on demand
-			allocateSparseRowsBlock(false);
-			if(sparseRows[r]==null)
-				sparseRows[r]=new SparseRow(estimatedNNzsPerRow, clen);
-			double curV=sparseRows[r].get(c);
-			curV+=v;
-			sparseRows[r].set(c, curV);
-			
-		}
-		else
-		{
-			//allocate and init dense block (w/o overwriting nnz)
-			allocateDenseBlock(false);
-			
-			int index=r*clen+c;
-			denseBlock[index]+=v;
-		}
+		quickSetValue(r, c, v);
 	}
 	
 	/**
@@ -835,9 +679,9 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	{
 		if(sparse)
 		{
-			if( sparseRows==null || sparseRows.length<=r || sparseRows[r]==null )
+			if( sparseBlock==null )
 				return 0;
-			return sparseRows[r].get(c);
+			return sparseBlock.get(r, c);
 		}
 		else
 		{
@@ -858,16 +702,15 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		if(sparse)
 		{
 			//early abort
-			if( (sparseRows==null || sparseRows.length<=r || sparseRows[r]==null) && v==0 )
+			if( (sparseBlock==null || sparseBlock.isEmpty(r)) && v==0 )
 				return;
 			
 			//allocation on demand
 			allocateSparseRowsBlock(false);
-			if( sparseRows[r]==null )
-				sparseRows[r] = new SparseRow(estimatedNNzsPerRow, clen);
+			sparseBlock.allocate(r, estimatedNNzsPerRow, clen);
 			
 			//set value and maintain nnz
-			if( sparseRows[r].set(c, v) )
+			if( sparseBlock.set(r, c, v) )
 				nonZeros += (v!=0) ? 1 : -1;
 		}
 		else
@@ -909,9 +752,9 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	
 	public double getValueSparseUnsafe(int r, int c) 
 	{
-		if(sparseRows==null || sparseRows.length<=r || sparseRows[r]==null)
+		if(sparseBlock==null || sparseBlock.isEmpty(r))
 			return 0;
-		return sparseRows[r].get(c);	
+		return sparseBlock.get(r, c);	
 	}
 	
 	/**
@@ -941,35 +784,34 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		{
 			//allocation on demand (w/o overwriting nnz)
 			allocateSparseRowsBlock(false);
-			if(sparseRows[r]==null)
-				sparseRows[r]=new SparseRow(estimatedNNzsPerRow, clen);
+			sparseBlock.allocate(r, estimatedNNzsPerRow, clen);
 			
 			//set value and maintain nnz
-			sparseRows[r].append(c, v);
+			sparseBlock.append(r, c, v);
 			nonZeros++;
 		}
 	}
 	
-	public void appendRow(int r, SparseRow values)
+	/**
+	 * 
+	 * @param r
+	 * @param row
+	 */
+	public void appendRow(int r, SparseRow row)
 	{
-		if(values==null)
+		if(row == null)
 			return;
-		if(sparse)
-		{
+		
+		if(sparse) {
 			//allocation on demand
 			allocateSparseRowsBlock(false);
-			if(sparseRows[r]==null)
-				sparseRows[r]=new SparseRow(values);
-			else
-				sparseRows[r].copy(values);
-			nonZeros+=values.size();
-			
+			sparseBlock.set(r, row, true);
+			nonZeros += row.size();
 		}
-		else
-		{
-			int[] cols=values.getIndexContainer();
-			double[] vals=values.getValueContainer();
-			for(int i=0; i<values.size(); i++)
+		else {
+			int[] cols = row.indexes();
+			double[] vals = row.values();
+			for(int i=0; i<row.size(); i++)
 				quickSetValue(r, cols[i], vals[i]);
 		}
 	}
@@ -992,19 +834,17 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		{
 			for( int i=0; i<that.rlen; i++ )
 			{
-				SparseRow brow = that.sparseRows[i];
-				if( brow!=null && !brow.isEmpty() )
-				{
+				SparseBlock b = that.sparseBlock;
+				if( !b.isEmpty(i) ) {
 					int aix = rowoffset+i;
-					int len = brow.size();
-					int[] ix = brow.getIndexContainer();
-					double[] val = brow.getValueContainer();
+					int pos = b.pos(i);
+					int len = b.size(i);
+					int[] ix = b.indexes(i);
+					double[] val = b.values(i);
 					
-					if( sparseRows[aix]==null )
-						sparseRows[aix] = new SparseRow(estimatedNNzsPerRow,clen);
-					
-					for( int j=0; j<len; j++ )
-						sparseRows[aix].append(coloffset+ix[j], val[j]);		
+					sparseBlock.allocate(aix, estimatedNNzsPerRow,clen);
+					for( int j=pos; j<pos+len; j++ )
+						sparseBlock.append(aix, coloffset+ix[j], val[j]);		
 				}
 			}
 		}
@@ -1016,11 +856,10 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 				for( int j=0, bix=i*that.clen; j<that.clen; j++ )
 				{
 					double val = that.denseBlock[bix+j];
-					if( val != 0 )
-					{
-						if( sparseRows[aix]==null )//create sparserow only if required
-							sparseRows[aix] = new SparseRow(estimatedNNzsPerRow,clen);
-						sparseRows[aix].append(coloffset+j, val);
+					if( val != 0 ) {
+						//create sparserow only if required
+						sparseBlock.allocate(aix, estimatedNNzsPerRow,clen);
+						sparseBlock.append(aix, coloffset+j, val);
 					}
 				}
 			}
@@ -1030,14 +869,10 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	/**
 	 * 
 	 */
-	public void sortSparseRows()
-	{
-		if( !sparse || sparseRows==null )
-			return;
-		
-		for( SparseRow arow : sparseRows )
-			if( arow!=null && arow.size()>1 )
-				arow.sort();
+	public void sortSparseRows() {
+		if( !sparse || sparseBlock==null )
+			return;		
+		sparseBlock.sort();
 	}
 	
 	/**
@@ -1337,14 +1172,14 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		
 		//copy dense to sparse
 		double[] a = denseBlock;
-		SparseRow[] c = sparseRows;
+		SparseBlock c = sparseBlock;
 		
 		for( int i=0, aix=0; i<rlen; i++ )
 			for(int j=0; j<clen; j++, aix++)
 				if( a[aix] != 0 ) {
-					if( c[i]==null ) //create sparse row only if required
-						c[i]=new SparseRow(estimatedNNzsPerRow, clen);
-					c[i].append(j, a[aix]);
+					//create sparse row only if required
+					c.allocate(i, estimatedNNzsPerRow, clen);
+					c.append(i, j, a[aix]);
 					nonZeros++;
 				}
 				
@@ -1363,7 +1198,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		sparse = false;
 		
 		//early abort on empty blocks
-		if(sparseRows==null)
+		if(sparseBlock==null)
 			return;
 		
 		int limit=rlen*clen;
@@ -1376,38 +1211,36 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		Arrays.fill(denseBlock, 0, limit, 0);
 		
 		//copy sparse to dense
-		SparseRow[] a = sparseRows;
+		SparseBlock a = sparseBlock;
 		double[] c = denseBlock;
 		
 		for( int i=0, cix=0; i<rlen; i++, cix+=clen)
-			if( a[i] != null && !a[i].isEmpty() ) {
-				int alen = a[i].size();
-				int[] aix = a[i].getIndexContainer();
-				double[] avals = a[i].getValueContainer();
-				for(int j=0; j<alen; j++)
+			if( !a.isEmpty(i) ) {
+				int apos = a.pos(i);
+				int alen = a.size(i);
+				int[] aix = a.indexes(i);
+				double[] avals = a.values(i);
+				for(int j=apos; j<apos+alen; j++)
 					if( avals[j] != 0 )
 						c[ cix+aix[j] ] = avals[j];
 			}
 		
 		//cleanup sparse rows
-		sparseRows = null;
+		sparseBlock = null;
 	}
 
 	public void recomputeNonZeros()
 	{
 		nonZeros=0;
-		if( sparse && sparseRows!=null )
+		if( sparse && sparseBlock!=null )
 		{
-			int limit = Math.min(rlen, sparseRows.length);
-			for(int i=0; i<limit; i++)
-				if(sparseRows[i]!=null)
-					nonZeros += sparseRows[i].size();
+			//note: rlen might be <= sparseBlock.numRows()
+			nonZeros = sparseBlock.size(0, rlen);
 		}
 		else if( !sparse && denseBlock!=null )
 		{
 			int limit=rlen*clen;
-			for(int i=0; i<limit; i++)
-			{
+			for(int i=0; i<limit; i++) {
 				//HotSpot JVM bug causes crash in presence of NaNs 
 				//nonZeros += (denseBlock[i]!=0) ? 1 : 0;
 				if( denseBlock[i]!=0 )
@@ -1421,32 +1254,22 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		long nnz = 0;
 		if(sparse)
 		{
-			if(sparseRows!=null)
+			if(sparseBlock!=null)
 			{
-				int rlimit = Math.min( ru+1, Math.min(rlen, sparseRows.length) );
+				int rlimit = Math.min( ru+1, rlen);
 				if( cl==0 && cu==clen-1 ) //specific case: all cols
 				{
-					for(int i=rl; i<rlimit; i++)
-						if(sparseRows[i]!=null && !sparseRows[i].isEmpty())
-							nnz+=sparseRows[i].size();	
+					nnz = sparseBlock.size(rl, ru+1);
 				}
 				else if( cl==cu ) //specific case: one column
 				{
 					for(int i=rl; i<rlimit; i++)
-						if(sparseRows[i]!=null && !sparseRows[i].isEmpty())
-							nnz += (sparseRows[i].get(cl)!=0) ? 1 : 0;
+						if(!sparseBlock.isEmpty(i))
+							nnz += (sparseBlock.get(i, cl)!=0) ? 1 : 0;
 				}
 				else //general case
 				{
-					int astart,aend;
-					for(int i=rl; i<rlimit; i++)
-						if(sparseRows[i]!=null && !sparseRows[i].isEmpty())
-						{
-							SparseRow arow = sparseRows[i];
-							astart = arow.searchIndexesFirstGTE(cl);
-							aend = arow.searchIndexesFirstGTE(cu);
-							nnz += (astart!=-1) ? (aend-astart+1) : 0;
-						}
+					nnz = sparseBlock.size(rl, ru+1, cl, cu+1);
 				}
 			}
 		}
@@ -1528,16 +1351,14 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}
 	
 		allocateSparseRowsBlock(false);
-		for(int i=0; i<Math.min(that.sparseRows.length, rlen); i++)
+		for(int i=0; i<Math.min(that.sparseBlock.numRows(), rlen); i++)
 		{
-			if(that.sparseRows[i]!=null)
-			{
-				if(sparseRows[i]==null)
-					sparseRows[i]=new SparseRow(that.sparseRows[i]);
-				else
-					sparseRows[i].copy(that.sparseRows[i]);
-			}else if(this.sparseRows[i]!=null)
-				this.sparseRows[i].reset(estimatedNNzsPerRow, clen);
+			if(!that.sparseBlock.isEmpty(i)) {
+				sparseBlock.set(i, that.sparseBlock.get(i), true);				
+			}
+			else if(!this.sparseBlock.isEmpty(i)) {
+				this.sparseBlock.reset(i,estimatedNNzsPerRow, clen);
+			}
 		}
 	}
 	
@@ -1575,15 +1396,17 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		allocateDenseBlock(false);
 		
 		int start=0;
-		for(int r=0; r<Math.min(that.sparseRows.length, rlen); r++, start+=clen)
+		for(int r=0; r<Math.min(that.sparseBlock.numRows(), rlen); r++, start+=clen)
 		{
-			if(that.sparseRows[r]==null) 
+			if(that.sparseBlock.isEmpty(r)) 
 				continue;
-			double[] values=that.sparseRows[r].getValueContainer();
-			int[] cols=that.sparseRows[r].getIndexContainer();
-			for(int i=0; i<that.sparseRows[r].size(); i++)
-			{
-				denseBlock[start+cols[i]]=values[i];
+			int pos = that.sparseBlock.pos(r);
+			int len = that.sparseBlock.size(r);
+			int[] aix = that.sparseBlock.indexes(r);
+			double[] avals = that.sparseBlock.values(r);
+			
+			for(int i=pos; i<pos+len; i++) {
+				denseBlock[start+aix[i]]=avals[i];
 			}
 		}
 	}
@@ -1600,18 +1423,16 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		allocateSparseRowsBlock(false);
 	
 		for(int i=0, ix=0; i<rlen; i++)
-		{
-			if( sparseRows[i]!=null ) 
-				sparseRows[i].reset(estimatedNNzsPerRow, clen);
+		{			
+			sparseBlock.reset(i, estimatedNNzsPerRow, clen);
 			
 			for(int j=0; j<clen; j++)
 			{
 				double val = that.denseBlock[ix++];
-				if( val != 0 )
-				{
-					if(sparseRows[i]==null) //create sparse row only if required
-						sparseRows[i]=new SparseRow(estimatedNNzsPerRow, clen);
-					sparseRows[i].append(j, val);
+				if( val != 0 ) {
+					//create sparse row only if required
+					sparseBlock.allocate(i, estimatedNNzsPerRow, clen);
+					sparseBlock.append(i, j, val);
 				}
 			}
 		}
@@ -1653,69 +1474,60 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		//handle empty src and dest
 		if( src.isEmptyBlock(false) )
 		{
-			if( awareDestNZ && sparseRows != null )
+			if( awareDestNZ && sparseBlock != null )
 				copyEmptyToSparse(rl, ru, cl, cu, true);
 			return;		
 		}
-		if(sparseRows==null)
-			sparseRows=new SparseRow[rlen];
-		else if( awareDestNZ )
-		{
+		
+		if(sparseBlock==null)
+			allocateSparseRowsBlock(false);
+		else if( awareDestNZ ) {
 			copyEmptyToSparse(rl, ru, cl, cu, true);
 			//explicit clear if awareDestNZ because more efficient since
 			//src will have multiple columns and only few overwriting values
 		}
 		
-		//copy values
-		int alen;
-		int[] aix;
-		double[] avals;
+		SparseBlock a = src.sparseBlock;
+		SparseBlock b = sparseBlock;
 		
+		//copy values
 		for( int i=0; i<src.rlen; i++ )
 		{
-			SparseRow arow = src.sparseRows[i];
-			if( arow != null && !arow.isEmpty() )
+			if( !a.isEmpty(i) )
 			{
-				alen = arow.size();
-				aix = arow.getIndexContainer();
-				avals = arow.getValueContainer();		
+				int apos = a.pos(i); 
+				int alen = a.size(i);
+				int[] aix = a.indexes(i);
+				double[] avals = a.values(i);		
 				
-				if( sparseRows[rl+i] == null || sparseRows[rl+i].isEmpty()  )
+				if( b.isEmpty(rl+i)  )
 				{
-					sparseRows[rl+i] = new SparseRow(estimatedNNzsPerRow, clen); 
-					SparseRow brow = sparseRows[rl+i];
-					for( int j=0; j<alen; j++ )
-						brow.append(cl+aix[j], avals[j]);
+					b.allocate(rl+i, estimatedNNzsPerRow, clen);
+					for( int j=apos; j<apos+alen; j++ )
+						b.append(rl+i, cl+aix[j], avals[j]);
 					
 					if( awareDestNZ )
-						nonZeros += brow.size();
+						nonZeros += b.size(rl+i);
 				}
 				else if( awareDestNZ ) //general case (w/ awareness NNZ)
 				{
-					SparseRow brow = sparseRows[rl+i];
-					int lnnz = brow.size();
-					if( cl==cu && cl==aix[0] ) 
-					{
-						if (avals[0]==0)
-							brow.delete(cl);
-						else
-							brow.set(cl, avals[0] );
+					int lnnz = b.size(rl+i);
+					if( cl==cu && cl==aix[apos] ) {
+						b.set(rl+i, cl, avals[apos] );
 					}
-					else
-					{
-						brow.deleteIndexRange(cl, cu);
-						for( int j=0; j<alen; j++ )
-							brow.set(cl+aix[j], avals[j]);
+					else {
+						//TODO perf sparse row
+						b.deleteIndexRange(rl+i, cl, cu+1);
+						for( int j=apos; j<apos+alen; j++ )
+							b.set(rl+i, cl+aix[j], avals[j]);
 					}
-					nonZeros += (brow.size() - lnnz);
+					nonZeros += (b.size(rl+i) - lnnz);
 				}	
 				else //general case (w/o awareness NNZ)
 				{		
-					SparseRow brow = sparseRows[rl+i];
-
-					//brow.set(cl, arow);	
-					for( int j=0; j<alen; j++ )
-						brow.set(cl+aix[j], avals[j]);
+					//TODO perf sparse row					
+					for( int j=apos; j<apos+alen; j++ )
+						b.set(rl+i, cl+aix[j], avals[j]);
 				}				
 			}
 		}
@@ -1742,20 +1554,17 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}
 
 		//copy values
-		int alen;
-		int[] aix;
-		double[] avals;
-		
+		SparseBlock a = src.sparseBlock;
 		for( int i=0, ix=rl*clen; i<src.rlen; i++, ix+=clen )
 		{	
-			SparseRow arow = src.sparseRows[i];
-			if( arow != null && !arow.isEmpty() )
+			if( !a.isEmpty(i) )
 			{
-				alen = arow.size();
-				aix = arow.getIndexContainer();
-				avals = arow.getValueContainer();
+				int apos = a.pos(i);
+				int alen = a.size(i);
+				int[] aix = a.indexes(i);
+				double[] avals = a.values(i);
 				
-				for( int j=0; j<alen; j++ )
+				for( int j=apos; j<apos+alen; j++ )
 					denseBlock[ix+cl+aix[j]] = avals[j];
 				
 				if(awareDestNZ)
@@ -1769,55 +1578,53 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		//handle empty src and dest
 		if( src.isEmptyBlock(false) )
 		{
-			if( awareDestNZ && sparseRows != null )
+			if( awareDestNZ && sparseBlock != null )
 				copyEmptyToSparse(rl, ru, cl, cu, true);
 			return;		
 		}
-		if(sparseRows==null)
-			sparseRows=new SparseRow[rlen];
+		if(sparseBlock==null) {
+			sparseBlock=SparseBlockFactory
+			.createSparseBlock(DEFAULT_SPARSEBLOCK, rlen);
+		}
 		//no need to clear for awareDestNZ since overwritten  
 		
 		//copy values
-		double val;		
+		SparseBlock a = sparseBlock;
 		for( int i=0, ix=0; i<src.rlen; i++, ix+=src.clen )
 		{
 			int rix = rl + i;
-			if( sparseRows[rix]==null || sparseRows[rix].isEmpty() )
+			if( a.isEmpty(rix) )
 			{
-				for( int j=0; j<src.clen; j++ )
-					if( (val = src.denseBlock[ix+j]) != 0 )
-					{
-						if( sparseRows[rix]==null )
-							sparseRows[rix] = new SparseRow(estimatedNNzsPerRow, clen); 
-						sparseRows[rix].append(cl+j, val); 
+				for( int j=0; j<src.clen; j++ ) {
+					double val = src.denseBlock[ix+j];
+					if( val != 0 ) {
+						a.allocate(rix, estimatedNNzsPerRow, clen);
+						sparseBlock.append(rix, cl+j, val); 
 					}
-				
-				if( awareDestNZ && sparseRows[rix]!=null )
-					nonZeros += sparseRows[rix].size();
+				}
+			
+				if( awareDestNZ && !a.isEmpty(rix) )
+					nonZeros += a.size(rix);
 			}
 			else if( awareDestNZ ) //general case (w/ awareness NNZ)
 			{
-				SparseRow brow = sparseRows[rix];
-				int lnnz = brow.size();
-				if( cl==cu ) 
-				{
-					if ((val = src.denseBlock[ix])==0)
-						brow.delete(cl);
-					else
-						brow.set(cl, val);
+				int lnnz = a.size(rix);
+				if( cl==cu ) {
+					double val = src.denseBlock[ix];
+					a.set(rix, cl, val);
 				}
-				else
-				{
-					brow.setIndexRange(cl, cu, src.denseBlock, ix, src.clen);
+				else {
+					a.setIndexRange(rix, cl, cu+1, src.denseBlock, ix, src.clen);
 				}
-				nonZeros += (brow.size() - lnnz);
+				nonZeros += (a.size(rix) - lnnz);
 			}	
 			else //general case (w/o awareness NNZ)
 			{
-				SparseRow brow = sparseRows[rix];
-				for( int j=0; j<src.clen; j++ )
-					if( (val = src.denseBlock[ix+j]) != 0 ) 
-						brow.set(cl+j, val);
+				for( int j=0; j<src.clen; j++ ) {
+					double val = src.denseBlock[ix+j];
+					if( val != 0 ) 
+						a.set(rix, cl+j, val);
+				}
 			}
 		}
 	}
@@ -1853,43 +1660,26 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	
 	private void copyEmptyToSparse(int rl, int ru, int cl, int cu, boolean updateNNZ ) 
 	{
+		SparseBlock a = sparseBlock;
+		
 		if( cl==cu ) //specific case: column vector
 		{
-			if( updateNNZ )
-			{
-				for( int i=rl; i<=ru; i++ )
-					if( sparseRows[i] != null && !sparseRows[i].isEmpty() )
-					{
-						int lnnz = sparseRows[i].size();
-						sparseRows[i].delete(cl);
-						nonZeros += (sparseRows[i].size()-lnnz);
-					}
-			}
-			else
-			{
-				for( int i=rl; i<=ru; i++ )
-					if( sparseRows[i] != null && !sparseRows[i].isEmpty() )
-						sparseRows[i].delete(cl);
-			}
+			for( int i=rl; i<=ru; i++ )
+				if( !a.isEmpty(i) ) {
+					boolean update = a.set(i, cl, 0);
+					if( updateNNZ )
+						nonZeros -= update ? 1 : 0;							
+				}			
 		}
 		else
 		{
-			if( updateNNZ )
-			{
-				for( int i=rl; i<=ru; i++ )
-					if( sparseRows[i] != null && !sparseRows[i].isEmpty() )
-					{
-						int lnnz = sparseRows[i].size();
-						sparseRows[i].deleteIndexRange(cl, cu);
-						nonZeros += (sparseRows[i].size()-lnnz);
-					}						
-			}
-			else
-			{
-				for( int i=rl; i<=ru; i++ )
-					if( sparseRows[i] != null && !sparseRows[i].isEmpty() )
-						sparseRows[i].deleteIndexRange(cl, cu);
-			}
+			for( int i=rl; i<=ru; i++ )
+				if( !a.isEmpty(i) ) {
+					int lnnz = a.size(i);
+					a.deleteIndexRange(i, cl, cu+1);
+					if( updateNNZ )
+						nonZeros += (a.size(i)-lnnz);
+				}	
 		}
 	}
 	
@@ -1957,18 +1747,18 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		if( that.sparse ) //DENSE <- SPARSE
 		{
 			double[] a = denseBlock;
-			SparseRow[] b = that.sparseRows;
+			SparseBlock b = that.sparseBlock;
 			int m = rlen;
 			int n = clen;
 			
 			for( int i=0, aix=0; i<m; i++, aix+=n )
-				if( b[i] != null && !b[i].isEmpty() )
+				if( !b.isEmpty(i) )
 				{
-					SparseRow brow = b[i];
-					int blen = brow.size();
-					int[] bix = brow.getIndexContainer();
-					double[] bval = brow.getValueContainer();
-					for( int j=0; j<blen; j++ )
+					int bpos = b.pos(i);
+					int blen = b.size(i);
+					int[] bix = b.indexes(i);
+					double[] bval = b.values(i);
+					for( int j=bpos; j<bpos+blen; j++ )
 						if( bval[j] != 0 )
 							a[ aix + bix[j] ] = bval[j];
 				}
@@ -1993,42 +1783,41 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	{
 		if( that.sparse ) //SPARSE <- SPARSE
 		{
-			SparseRow[] a = sparseRows;
-			SparseRow[] b = that.sparseRows;
+			SparseBlock a = sparseBlock;
+			SparseBlock b = that.sparseBlock;
 			int m = rlen;
 			
 			for( int i=0; i<m; i++ ) 
 			{
-				if( b[i] != null && !b[i].isEmpty() )
+				if( !b.isEmpty(i) )
 				{
-					if( a[i] == null || a[i].isEmpty() ) {
+					if( a.isEmpty(i) ) {
 						//copy entire sparse row (no sort required)
-						a[i] = new SparseRow(b[i]); 
+						a.set(i, b.get(i), true); 
 					}
 					else
 					{
 						boolean appended = false;
-						SparseRow arow = a[i];
-						SparseRow brow = b[i];
-						int blen = brow.size();
-						int[] bix = brow.getIndexContainer();
-						double[] bval = brow.getValueContainer();
-						for( int j=0; j<blen; j++ ) {
+						int bpos = b.pos(i);
+						int blen = b.size(i);
+						int[] bix = b.indexes(i);
+						double[] bval = b.values(i);
+						for( int j=bpos; j<bpos+blen; j++ ) {
 							if( bval[j] != 0 ) {
-								arow.append(bix[j], bval[j]);
+								a.append(i, bix[j], bval[j]);
 								appended = true;
 							}
 						}
 						//only sort if value appended
 						if( !appendOnly && appended )
-							arow.sort();		
+							a.sort(i);		
 					}
 				}
 			}
 		}
 		else //SPARSE <- DENSE
 		{
-			SparseRow[] a = sparseRows;
+			SparseBlock a = sparseBlock;
 			double[] b = that.denseBlock;
 			int m = rlen;
 			int n = clen;
@@ -2044,7 +1833,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 				}
 				//only sort if value appended
 				if( !appendOnly && appended )
-					a[i].sort();
+					a.sort(i);
 			}
 		}
 	}
@@ -2157,33 +1946,25 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		if( in instanceof MatrixBlockDataInput ) //fast deserialize
 		{
 			MatrixBlockDataInput mbin = (MatrixBlockDataInput)in;
-			nonZeros = mbin.readSparseRows(rlen, sparseRows);
+			nonZeros = mbin.readSparseRows(rlen, sparseBlock);
 		}
 		else if( in instanceof DataInputBuffer  && MRJobConfiguration.USE_BINARYBLOCK_SERIALIZATION ) 
 		{
 			//workaround because sequencefile.reader.next(key, value) does not yet support serialization framework
 			DataInputBuffer din = (DataInputBuffer)in;
 			MatrixBlockDataInput mbin = new FastBufferedDataInputStream(din);
-			nonZeros = mbin.readSparseRows(rlen, sparseRows);		
+			nonZeros = mbin.readSparseRows(rlen, sparseBlock);		
 			((FastBufferedDataInputStream)mbin).close();
 		}
 		else //default deserialize
 		{
-			for(int r=0; r<rlen; r++)
-			{
-				int nr=in.readInt();
-				if(nr==0)
-				{
-					if(sparseRows[r]!=null)
-						sparseRows[r].reset(estimatedNNzsPerRow, clen);
-					continue;
+			for(int r=0; r<rlen; r++) {
+				int rnnz = in.readInt(); //row nnz
+				if( rnnz > 0 ) {
+					sparseBlock.reset(r, rnnz, clen);
+					for(int j=0; j<rnnz; j++) //col index/value pairs
+						sparseBlock.append(r, in.readInt(), in.readDouble());		
 				}
-				if(sparseRows[r]==null)
-					sparseRows[r]=new SparseRow(nr);
-				else
-					sparseRows[r].reset(nr, clen);
-				for(int j=0; j<nr; j++)
-					sparseRows[r].append(in.readInt(), in.readDouble());
 			}
 		}
 	}
@@ -2229,10 +2010,9 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			for(long i=0; i<nonZeros; i++) {
 				int r = in.readInt();
 				int c = in.readInt();
-				double val = in.readDouble();			
-				if(sparseRows[r]==null)
-					sparseRows[r]=new SparseRow(1,clen);
-				sparseRows[r].append(c, val);
+				double val = in.readDouble();
+				sparseBlock.allocate(r, 1,clen);
+				sparseBlock.append(r, c, val);
 			}
 		}
 		else //ULTRA-SPARSE COL
@@ -2240,10 +2020,9 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			//col: read iv-pairs (should never happen since always dense)
 			for(long i=0; i<nonZeros; i++) {
 				int r = in.readInt();
-				double val = in.readDouble();			
-				if(sparseRows[r]==null)
-					sparseRows[r]=new SparseRow(1,1);
-				sparseRows[r].append(0, val);
+				double val = in.readDouble();		
+				sparseBlock.allocate(r, 1, 1);
+				sparseBlock.append(r, 0, val);
 			}
 		}	
 	}
@@ -2296,7 +2075,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		if( sparseSrc )
 		{
 			//write sparse to *
-			if( sparseRows==null || nonZeros==0 ) 
+			if( sparseBlock==null || nonZeros==0 ) 
 				writeEmptyBlock(out);
 			else if( nonZeros<rlen && sparseDst ) 
 				writeSparseToUltraSparse(out); 
@@ -2361,26 +2140,26 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		writeNnzInfo( out, false );
 		
 		if( out instanceof MatrixBlockDataOutput ) //fast serialize
-			((MatrixBlockDataOutput)out).writeSparseRows(rlen, sparseRows);
+			((MatrixBlockDataOutput)out).writeSparseRows(rlen, sparseBlock);
 		else //general case (if fast serialize not supported)
 		{
 			int r=0;
-			for(;r<Math.min(rlen, sparseRows.length); r++)
+			for(;r<Math.min(rlen, sparseBlock.numRows()); r++)
 			{
-				if(sparseRows[r]==null)
+				if( sparseBlock.isEmpty(r) )
 					out.writeInt(0);
 				else
 				{
-					int nr=sparseRows[r].size();
+					int pos = sparseBlock.pos(r);
+					int nr = sparseBlock.size(r);
+					int[] cols = sparseBlock.indexes(r);
+					double[] values=sparseBlock.values(r);
+					
 					out.writeInt(nr);
-					int[] cols=sparseRows[r].getIndexContainer();
-					double[] values=sparseRows[r].getValueContainer();
-					for(int j=0; j<nr; j++)
-					{
+					for(int j=pos; j<pos+nr; j++) {
 						out.writeInt(cols[j]);
 						out.writeDouble(values[j]);
-					}
-					
+					}					
 				}	
 			}
 			for(;r<rlen; r++)
@@ -2403,13 +2182,15 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		if( clen > 1 ) //ULTRA-SPARSE BLOCK
 		{
 			//block: write ijv-triples
-			for(int r=0;r<Math.min(rlen, sparseRows.length); r++)
-				if(sparseRows[r]!=null && !sparseRows[r].isEmpty() )
+			for(int r=0;r<Math.min(rlen, sparseBlock.numRows()); r++)
+				if( !sparseBlock.isEmpty(r) )
 				{
-					int alen = sparseRows[r].size();
-					int[] aix = sparseRows[r].getIndexContainer();
-					double[] avals = sparseRows[r].getValueContainer();
-					for(int j=0; j<alen; j++) {
+					int apos = sparseBlock.pos(r);
+					int alen = sparseBlock.size(r);
+					int[] aix = sparseBlock.indexes(r);
+					double[] avals = sparseBlock.values(r);
+					
+					for(int j=apos; j<apos+alen; j++) {
 						//ultra-sparse block: write ijv-triples
 						out.writeInt(r);
 						out.writeInt(aix[j]);
@@ -2421,10 +2202,11 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		else //ULTRA-SPARSE COL
 		{
 			//block: write iv-pairs (should never happen since always dense)
-			for(int r=0;r<Math.min(rlen, sparseRows.length); r++)
-				if(sparseRows[r]!=null && !sparseRows[r].isEmpty() ) {
+			for(int r=0;r<Math.min(rlen, sparseBlock.numRows()); r++)
+				if(!sparseBlock.isEmpty(r) ) {
+					int pos = sparseBlock.pos(r);
 					out.writeInt(r);
-					out.writeDouble(sparseRows[r].getValueContainer()[0]);
+					out.writeDouble(sparseBlock.values(r)[pos]);
 					wnnz++;
 				}
 		}
@@ -2447,27 +2229,28 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		out.writeByte( BlockType.DENSE_BLOCK.ordinal() );
 		
 		//write data (from sparse to dense)
-		if( sparseRows==null ) //empty block
+		if( sparseBlock==null ) //empty block
 			for( int i=0; i<rlen*clen; i++ )
 				out.writeDouble(0);
 		else //existing sparse block
 		{
+			SparseBlock a = sparseBlock;
 			for( int i=0; i<rlen; i++ )
 			{
-				if( i<sparseRows.length && sparseRows[i]!=null && !sparseRows[i].isEmpty() )
+				if( i<a.numRows() && !a.isEmpty(i) )
 				{
-					SparseRow arow = sparseRows[i];
-					int alen = arow.size();
-					int[] aix = arow.getIndexContainer();
-					double[] avals = arow.getValueContainer();
+					int apos = a.pos(i);
+					int alen = a.size(i);
+					int[] aix = a.indexes(i);
+					double[] avals = a.values(i);
 					//foreach non-zero value, fill with 0s if required
 					for( int j=0, j2=0; j2<alen; j++, j2++ ) {
-						for( ; j<aix[j2]; j++ )
+						for( ; j<aix[apos+j2]; j++ )
 							out.writeDouble( 0 );
-						out.writeDouble( avals[j2] );
+						out.writeDouble( avals[apos+j2] );
 					}					
 					//remaining 0 values in row
-					for( int j=aix[alen-1]+1; j<clen; j++)
+					for( int j=aix[apos+alen-1]+1; j<clen; j++)
 						out.writeDouble( 0 );
 				}
 				else //empty row
@@ -2670,7 +2453,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		if( sparseSrc )
 		{
 			//write sparse to *
-			if(sparseRows==null || lnonZeros==0)
+			if(sparseBlock==null || lnonZeros==0)
 				return HEADER_SIZE; //empty block
 			else if( lnonZeros<lrlen && sparseDst )
 				return estimateSizeUltraSparseOnDisk(lrlen, lclen, lnonZeros); //ultra sparse block
@@ -2769,18 +2552,9 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		// basic variables and references sizes
 		double size = 44;
 		
-		//NOTES:
-		// * Each sparse row has a fixed overhead of 8B (reference) + 32B (object) +
-		//   12B (3 int members), 32B (overhead int array), 32B (overhead double array),
-		// * Each non-zero value requires 12B for the column-index/value pair.
-		// * Overheads for arrays, objects, and references refer to 64bit JVMs
-		// * If nnz < than rows we have only also empty rows.
-		
-		// account for sparsity and initial capacity
-		double cnnz = Math.max(SparseRow.initialCapacity, Math.ceil(sparsity*ncols));
-		double rlen = Math.min(nrows, Math.ceil(sparsity*nrows*ncols));
-		size += rlen * ( 116 + 12 * cnnz ); //sparse row
-		size += nrows * 8d; //empty rows
+		// delegate memory estimate to individual sparse blocks
+		size += SparseBlockFactory.estimateSizeSparseInMemory(
+			DEFAULT_SPARSEBLOCK, nrows, ncols, sparsity);
 		
 		// robustness for long overflows
 		return (long) Math.min(size, Long.MAX_VALUE);
@@ -3061,16 +2835,17 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		
 		if( sparse ) //SPARSE <- SPARSE
 		{
-			SparseRow[] a = sparseRows;
+			SparseBlock a = sparseBlock;
 			
 			for(int i=0; i<m; i++) {
-				if( a[i]!=null && !a[i].isEmpty() )
+				if( !a.isEmpty(i) )
 				{
-					int alen = a[i].size();
-					int[] aix = a[i].getIndexContainer();
-					double[] avals = a[i].getValueContainer();
+					int apos = a.pos(i);
+					int alen = a.size(i);
+					int[] aix = a.indexes(i);
+					double[] avals = a.values(i);
 					
-					for( int j=0; j<alen; j++ ) {
+					for( int j=apos; j<apos+alen; j++ ) {
 						double val = op.fn.execute(avals[j]);
 						ret.appendValue(i, aix[j], val);
 					}
@@ -3156,25 +2931,29 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		if(sparse)
 		{
 			nonZeros=0;
-			for(int r=0; r<Math.min(rlen, sparseRows.length); r++)
+			for(int r=0; r<Math.min(rlen, sparseBlock.numRows()); r++)
 			{
-				if(sparseRows[r]==null) 
+				if(sparseBlock.isEmpty(r)) 
 					continue;
-				double[] values=sparseRows[r].getValueContainer();
-				int[] cols=sparseRows[r].getIndexContainer();
+				
+				int apos = sparseBlock.pos(r);
+				int alen = sparseBlock.size(r);
+				int[] aix = sparseBlock.indexes(r);
+				double[] avals = sparseBlock.values(r);
+				
 				int pos=0;
-				for(int i=0; i<sparseRows[r].size(); i++)
+				for(int i=apos; i<apos+alen; i++)
 				{
-					double v=op.fn.execute(values[i]);
-					if(v!=0)
-					{
-						values[pos]=v;
-						cols[pos]=cols[i];
+					double v=op.fn.execute(avals[i]);
+					if(v!=0) {
+						avals[pos]=v;
+						aix[pos]=aix[i];
 						pos++;
 						nonZeros++;
 					}
 				}
-				sparseRows[r].truncate(pos);
+				//TODO perf sparse block: truncate replaced by deleteIndexrange
+				sparseBlock.deleteIndexRange(r, pos, clen);
 			}
 			
 		}
@@ -3372,18 +3151,18 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			{
 				if( newWithCor.isInSparseFormat() && aggOp.sparseSafe ) //SPARSE
 				{
-					SparseRow[] bRows = newWithCor.getSparseRows();
-					if( bRows==null ) //early abort on empty block
+					SparseBlock b = newWithCor.getSparseBlock();
+					if( b==null ) //early abort on empty block
 						return;
-					for( int r=0; r<Math.min(rlen, bRows.length); r++ )
+					for( int r=0; r<Math.min(rlen, b.numRows()); r++ )
 					{
-						SparseRow brow = bRows[r];
-						if( brow != null && !brow.isEmpty() ) 
+						if( !b.isEmpty(r) ) 
 						{
-							int blen = brow.size();
-							int[] bix = brow.getIndexContainer();
-							double[] bvals = brow.getValueContainer();
-							for( int j=0; j<blen; j++)
+							int bpos = b.pos(r);
+							int blen = b.size(r);
+							int[] bix = b.indexes(r);
+							double[] bvals = b.values(r);
+							for( int j=bpos; j<bpos+blen; j++)
 							{
 								int c = bix[j];
 								buffer._sum = this.quickGetValue(r, c);
@@ -3450,6 +3229,82 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 					quickSetValue(r, c, buffer._sum);
 					cor.quickSetValue(r, 0, n);
 					cor.quickSetValue(r, 1, buffer._correction);
+				}
+		}
+		else if (aggOp.correctionLocation == CorrectionLocationType.LASTFOURROWS
+				&& aggOp.increOp.fn instanceof CM
+				&& ((CM) aggOp.increOp.fn).getAggOpType() == AggregateOperationTypes.VARIANCE) {
+			// create buffers to store results
+			CM_COV_Object cbuff_curr = new CM_COV_Object();
+			CM_COV_Object cbuff_part = new CM_COV_Object();
+
+			// perform incremental aggregation
+			for (int r=0; r<rlen; r++)
+				for (int c=0; c<clen; c++) {
+					// extract current values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_curr.w = cor.quickGetValue(1, c); // count
+					cbuff_curr.m2._sum = quickGetValue(r, c) * (cbuff_curr.w - 1); // m2
+					cbuff_curr.mean._sum = cor.quickGetValue(0, c); // mean
+					cbuff_curr.m2._correction = cor.quickGetValue(2, c);
+					cbuff_curr.mean._correction = cor.quickGetValue(3, c);
+
+					// extract partial values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_part.w = newWithCor.quickGetValue(r+2, c); // count
+					cbuff_part.m2._sum = newWithCor.quickGetValue(r, c) * (cbuff_part.w - 1); // m2
+					cbuff_part.mean._sum = newWithCor.quickGetValue(r+1, c); // mean
+					cbuff_part.m2._correction = newWithCor.quickGetValue(r+3, c);
+					cbuff_part.mean._correction = newWithCor.quickGetValue(r+4, c);
+
+					// calculate incremental aggregated variance
+					cbuff_curr = (CM_COV_Object) aggOp.increOp.fn.execute(cbuff_curr, cbuff_part);
+
+					// store updated values: { var | mean, count, m2 correction, mean correction }
+					double var = cbuff_curr.getRequiredResult(AggregateOperationTypes.VARIANCE);
+					quickSetValue(r, c, var);
+					cor.quickSetValue(0, c, cbuff_curr.mean._sum); // mean
+					cor.quickSetValue(1, c, cbuff_curr.w); // count
+					cor.quickSetValue(2, c, cbuff_curr.m2._correction);
+					cor.quickSetValue(3, c, cbuff_curr.mean._correction);
+				}
+		}
+		else if (aggOp.correctionLocation == CorrectionLocationType.LASTFOURCOLUMNS
+				&& aggOp.increOp.fn instanceof CM
+				&& ((CM) aggOp.increOp.fn).getAggOpType() == AggregateOperationTypes.VARIANCE) {
+			// create buffers to store results
+			CM_COV_Object cbuff_curr = new CM_COV_Object();
+			CM_COV_Object cbuff_part = new CM_COV_Object();
+
+			// perform incremental aggregation
+			for (int r=0; r<rlen; r++)
+				for (int c=0; c<clen; c++) {
+					// extract current values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_curr.w = cor.quickGetValue(r, 1); // count
+					cbuff_curr.m2._sum = quickGetValue(r, c) * (cbuff_curr.w - 1); // m2
+					cbuff_curr.mean._sum = cor.quickGetValue(r, 0); // mean
+					cbuff_curr.m2._correction = cor.quickGetValue(r, 2);
+					cbuff_curr.mean._correction = cor.quickGetValue(r, 3);
+
+					// extract partial values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_part.w = newWithCor.quickGetValue(r, c+2); // count
+					cbuff_part.m2._sum = newWithCor.quickGetValue(r, c) * (cbuff_part.w - 1); // m2
+					cbuff_part.mean._sum = newWithCor.quickGetValue(r, c+1); // mean
+					cbuff_part.m2._correction = newWithCor.quickGetValue(r, c+3);
+					cbuff_part.mean._correction = newWithCor.quickGetValue(r, c+4);
+
+					// calculate incremental aggregated variance
+					cbuff_curr = (CM_COV_Object) aggOp.increOp.fn.execute(cbuff_curr, cbuff_part);
+
+					// store updated values: { var | mean, count, m2 correction, mean correction }
+					double var = cbuff_curr.getRequiredResult(AggregateOperationTypes.VARIANCE);
+					quickSetValue(r, c, var);
+					cor.quickSetValue(r, 0, cbuff_curr.mean._sum); // mean
+					cor.quickSetValue(r, 1, cbuff_curr.w); // count
+					cor.quickSetValue(r, 2, cbuff_curr.m2._correction);
+					cor.quickSetValue(r, 3, cbuff_curr.mean._correction);
 				}
 		}
 		else
@@ -3541,17 +3396,8 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 						}
 				}
 			}
-		}/*else if(aggOp.correctionLocation==0)
-		{
-			for(int r=0; r<rlen; r++)
-				for(int c=0; c<clen; c++)
-				{
-					//buffer._sum=this.getValue(r, c);
-					//buffer._correction=0;
-					//buffer=(KahanObject) aggOp.increOp.fn.execute(buffer, newWithCor.getValue(r, c));
-					setValue(r, c, this.getValue(r, c)+newWithCor.getValue(r, c));
-				}
-		}*/else if(aggOp.correctionLocation==CorrectionLocationType.LASTTWOROWS)
+		}
+		else if(aggOp.correctionLocation==CorrectionLocationType.LASTTWOROWS)
 		{
 			double n, n2, mu2;
 			for(int r=0; r<rlen-2; r++)
@@ -3589,6 +3435,82 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 					quickSetValue(r, c+2, buffer._correction);
 				}
 		}
+		else if (aggOp.correctionLocation == CorrectionLocationType.LASTFOURROWS
+				&& aggOp.increOp.fn instanceof CM
+				&& ((CM) aggOp.increOp.fn).getAggOpType() == AggregateOperationTypes.VARIANCE) {
+			// create buffers to store results
+			CM_COV_Object cbuff_curr = new CM_COV_Object();
+			CM_COV_Object cbuff_part = new CM_COV_Object();
+
+			// perform incremental aggregation
+			for (int r=0; r<rlen-4; r++)
+				for (int c=0; c<clen; c++) {
+					// extract current values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_curr.w = quickGetValue(r+2, c); // count
+					cbuff_curr.m2._sum = quickGetValue(r, c) * (cbuff_curr.w - 1); // m2
+					cbuff_curr.mean._sum = quickGetValue(r+1, c); // mean
+					cbuff_curr.m2._correction = quickGetValue(r+3, c);
+					cbuff_curr.mean._correction = quickGetValue(r+4, c);
+
+					// extract partial values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_part.w = newWithCor.quickGetValue(r+2, c); // count
+					cbuff_part.m2._sum = newWithCor.quickGetValue(r, c) * (cbuff_part.w - 1); // m2
+					cbuff_part.mean._sum = newWithCor.quickGetValue(r+1, c); // mean
+					cbuff_part.m2._correction = newWithCor.quickGetValue(r+3, c);
+					cbuff_part.mean._correction = newWithCor.quickGetValue(r+4, c);
+
+					// calculate incremental aggregated variance
+					cbuff_curr = (CM_COV_Object) aggOp.increOp.fn.execute(cbuff_curr, cbuff_part);
+
+					// store updated values: { var | mean, count, m2 correction, mean correction }
+					double var = cbuff_curr.getRequiredResult(AggregateOperationTypes.VARIANCE);
+					quickSetValue(r, c, var);
+					quickSetValue(r+1, c, cbuff_curr.mean._sum); // mean
+					quickSetValue(r+2, c, cbuff_curr.w); // count
+					quickSetValue(r+3, c, cbuff_curr.m2._correction);
+					quickSetValue(r+4, c, cbuff_curr.mean._correction);
+				}
+		}
+		else if (aggOp.correctionLocation == CorrectionLocationType.LASTFOURCOLUMNS
+				&& aggOp.increOp.fn instanceof CM
+				&& ((CM) aggOp.increOp.fn).getAggOpType() == AggregateOperationTypes.VARIANCE) {
+			// create buffers to store results
+			CM_COV_Object cbuff_curr = new CM_COV_Object();
+			CM_COV_Object cbuff_part = new CM_COV_Object();
+
+			// perform incremental aggregation
+			for (int r=0; r<rlen; r++)
+				for (int c=0; c<clen-4; c++) {
+					// extract current values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_curr.w = quickGetValue(r, c+2); // count
+					cbuff_curr.m2._sum = quickGetValue(r, c) * (cbuff_curr.w - 1); // m2
+					cbuff_curr.mean._sum = quickGetValue(r, c+1); // mean
+					cbuff_curr.m2._correction = quickGetValue(r, c+3);
+					cbuff_curr.mean._correction = quickGetValue(r, c+4);
+
+					// extract partial values: { var | mean, count, m2 correction, mean correction }
+					// note: m2 = var * (n - 1)
+					cbuff_part.w = newWithCor.quickGetValue(r, c+2); // count
+					cbuff_part.m2._sum = newWithCor.quickGetValue(r, c) * (cbuff_part.w - 1); // m2
+					cbuff_part.mean._sum = newWithCor.quickGetValue(r, c+1); // mean
+					cbuff_part.m2._correction = newWithCor.quickGetValue(r, c+3);
+					cbuff_part.mean._correction = newWithCor.quickGetValue(r, c+4);
+
+					// calculate incremental aggregated variance
+					cbuff_curr = (CM_COV_Object) aggOp.increOp.fn.execute(cbuff_curr, cbuff_part);
+
+					// store updated values: { var | mean, count, m2 correction, mean correction }
+					double var = cbuff_curr.getRequiredResult(AggregateOperationTypes.VARIANCE);
+					quickSetValue(r, c, var);
+					quickSetValue(r, c+1, cbuff_curr.mean._sum); // mean
+					quickSetValue(r, c+2, cbuff_curr.w); // count
+					quickSetValue(r, c+3, cbuff_curr.m2._correction);
+					quickSetValue(r, c+4, cbuff_curr.mean._correction);
+				}
+		}
 		else
 			throw new DMLRuntimeException("unrecognized correctionLocation: "+aggOp.correctionLocation);
 	}
@@ -3597,7 +3519,8 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	public MatrixValue reorgOperations(ReorgOperator op, MatrixValue ret, int startRow, int startColumn, int length)
 		throws DMLRuntimeException 
 	{
-		if ( !( op.fn instanceof SwapIndex || op.fn instanceof DiagIndex || op.fn instanceof SortIndex) )
+		if ( !( op.fn instanceof SwapIndex || op.fn instanceof DiagIndex 
+			|| op.fn instanceof SortIndex || op.fn instanceof RevIndex ) )
 			throw new DMLRuntimeException("the current reorgOperations cannot support: "+op.fn.getClass()+".");
 		
 		MatrixBlock result = checkType(ret);
@@ -3626,19 +3549,22 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			CellIndex temp = new CellIndex(0, 0);
 			if(sparse)
 			{
-				if(sparseRows!=null)
+				if(sparseBlock != null)
 				{
-					for(int r=0; r<Math.min(rlen, sparseRows.length); r++)
+					for(int r=0; r<Math.min(rlen, sparseBlock.numRows()); r++)
 					{
-						if(sparseRows[r]==null) 
+						if(sparseBlock.isEmpty(r)) 
 							continue;
-						int[] cols=sparseRows[r].getIndexContainer();
-						double[] values=sparseRows[r].getValueContainer();
-						for(int i=0; i<sparseRows[r].size(); i++)
-						{
-							tempCellIndex.set(r, cols[i]);
+						
+						int apos = sparseBlock.pos(r);
+						int alen = sparseBlock.size(r);
+						int[] aix = sparseBlock.indexes(r);
+						double[] avals = sparseBlock.values(r);
+						
+						for(int i=apos; i<apos+alen; i++) {
+							tempCellIndex.set(r, aix[i]);
 							op.fn.execute(tempCellIndex, temp);
-							result.appendValue(temp.row, temp.column, values[i]);
+							result.appendValue(temp.row, temp.column, avals[i]);
 						}
 					}
 				}
@@ -4080,9 +4006,8 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			//note: always dense dest
 			dest.allocateDenseBlock();
 			for( int i=rl; i<=ru; i++ ) {
-				SparseRow arow = sparseRows[i];
-				if( arow != null && !arow.isEmpty() ) {
-					double val = arow.get(cl);
+				if( !sparseBlock.isEmpty(i) ) {
+					double val = sparseBlock.get(i, cl);
 					if( val != 0 ) {
 						dest.denseBlock[i-rl] = val;
 						dest.nonZeros++;
@@ -4093,20 +4018,20 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		else if( rl==ru && cl==0 && cu==clen-1 ) //ROW VECTOR 
 		{
 			//note: always sparse dest, but also works for dense
-			dest.appendRow(0, sparseRows[rl]);
+			dest.appendRow(0, sparseBlock.get(rl));
 		}
 		else //general case (sparse/dense dest)
 		{
 			for(int i=rl; i <= ru; i++) 
-				if(sparseRows[i] != null && !sparseRows[i].isEmpty()) 
+				if( !sparseBlock.isEmpty(i)) 
 				{
-					SparseRow arow = sparseRows[i];
-					int alen = arow.size();
-					int[] aix = arow.getIndexContainer();
-					double[] avals = arow.getValueContainer();
-					int astart = (cl>0)?arow.searchIndexesFirstGTE(cl):0;
+					int apos = sparseBlock.pos(i);
+					int alen = sparseBlock.size(i);
+					int[] aix = sparseBlock.indexes(i);
+					double[] avals = sparseBlock.values(i);
+					int astart = (cl>0)?sparseBlock.posFIndexGTE(i, cl) : apos;
 					if( astart != -1 )
-						for( int j=astart; j<alen && aix[j] <= cu; j++ )
+						for( int j=astart; j<apos+alen && aix[j] <= cu; j++ )
 							dest.appendValue(i-rl, aix[j]-cl, avals[j]);	
 				}
 		}
@@ -4207,13 +4132,13 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		
 		if(sparse)
 		{
-			if(sparseRows!=null)
+			if(sparseBlock!=null)
 			{
 				int r=(int)range.rowStart;
-				for(; r<Math.min(Math.min(rowCut, sparseRows.length), range.rowEnd+1); r++)
+				for(; r<Math.min(Math.min(rowCut, sparseBlock.numRows()), range.rowEnd+1); r++)
 					sliceHelp(r, range, colCut, topleft, topright, normalBlockRowFactor-rowCut, normalBlockRowFactor, normalBlockColFactor);
 				
-				for(; r<=Math.min(range.rowEnd, sparseRows.length-1); r++)
+				for(; r<=Math.min(range.rowEnd, sparseBlock.numRows()-1); r++)
 					sliceHelp(r, range, colCut, bottomleft, bottomright, -rowCut, normalBlockRowFactor, normalBlockColFactor);
 				//System.out.println("in: \n"+this);
 				//System.out.println("outlist: \n"+outlist);
@@ -4249,15 +4174,15 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 	
 	private void sliceHelp(int r, IndexRange range, int colCut, MatrixBlock left, MatrixBlock right, int rowOffset, int normalBlockRowFactor, int normalBlockColFactor)
 	{
-		if(sparseRows[r]==null) 
+		if(sparseBlock.isEmpty(r)) 
 			return;
 		
-		int[] cols=sparseRows[r].getIndexContainer();
-		double[] values=sparseRows[r].getValueContainer();
-		int start=sparseRows[r].searchIndexesFirstGTE((int)range.colStart);
+		int[] cols=sparseBlock.indexes(r);
+		double[] values=sparseBlock.values(r);
+		int start=sparseBlock.posFIndexGTE(r, (int)range.colStart);
 		if(start<0) 
 			return;
-		int end=sparseRows[r].searchIndexesFirstLTE((int)range.colEnd);
+		int end=sparseBlock.posFIndexLTE(r, (int)range.colEnd);
 		if(end<0 || start>end) 
 			return;
 		
@@ -4339,27 +4264,27 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		
 		if(sparse)
 		{
-			if(sparseRows!=null)
+			if(sparseBlock!=null)
 			{
 				if(!complementary)//if zero out
 				{
-					for(int r=0; r<Math.min((int)range.rowStart, sparseRows.length); r++)
-						((MatrixBlock) result).appendRow(r, sparseRows[r]);
-					for(int r=Math.min((int)range.rowEnd+1, sparseRows.length); r<Math.min(rlen, sparseRows.length); r++)
-						((MatrixBlock) result).appendRow(r, sparseRows[r]);
+					for(int r=0; r<Math.min((int)range.rowStart, sparseBlock.numRows()); r++)
+						((MatrixBlock) result).appendRow(r, sparseBlock.get(r));
+					for(int r=Math.min((int)range.rowEnd+1, sparseBlock.numRows()); r<Math.min(rlen, sparseBlock.numRows()); r++)
+						((MatrixBlock) result).appendRow(r, sparseBlock.get(r));
 				}
-				for(int r=(int)range.rowStart; r<=Math.min(range.rowEnd, sparseRows.length-1); r++)
+				for(int r=(int)range.rowStart; r<=Math.min(range.rowEnd, sparseBlock.numRows()-1); r++)
 				{
-					if(sparseRows[r]==null) 
+					if(sparseBlock.isEmpty(r)) 
 						continue;
-					int[] cols=sparseRows[r].getIndexContainer();
-					double[] values=sparseRows[r].getValueContainer();
+					int[] cols=sparseBlock.indexes(r);
+					double[] values=sparseBlock.values(r);
 					
 					if(complementary)//if selection
 					{
-						int start=sparseRows[r].searchIndexesFirstGTE((int)range.colStart);
+						int start=sparseBlock.posFIndexGTE(r,(int)range.colStart);
 						if(start<0) continue;
-						int end=sparseRows[r].searchIndexesFirstGT((int)range.colEnd);
+						int end=sparseBlock.posFIndexGT(r,(int)range.colEnd);
 						if(end<0 || start>end) 
 							continue;
 						
@@ -4369,16 +4294,18 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 						}
 					}else
 					{
-						int start=sparseRows[r].searchIndexesFirstGTE((int)range.colStart);
-						if(start<0) start=sparseRows[r].size();
-						int end=sparseRows[r].searchIndexesFirstGT((int)range.colEnd);
-						if(end<0) end=sparseRows[r].size();
+						int pos = sparseBlock.pos(r);
+						int len = sparseBlock.size(r);
+						int start=sparseBlock.posFIndexGTE(r,(int)range.colStart);
+						if(start<0) start=pos+len;
+						int end=sparseBlock.posFIndexGT(r,(int)range.colEnd);
+						if(end<0) end=pos+len;
 						
-						for(int i=0; i<start; i++)
+						for(int i=pos; i<start; i++)
 						{
 							((MatrixBlock) result).appendValue(r, cols[i], values[i]);
 						}
-						for(int i=end; i<sparseRows[r].size(); i++)
+						for(int i=end; i<pos+len; i++)
 						{
 							((MatrixBlock) result).appendValue(r, cols[i], values[i]);
 						}
@@ -4456,6 +4383,12 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 				case LASTTWOCOLUMNS: 
 					tempCellIndex.column+=2; 
 					break;
+				case LASTFOURROWS:
+					tempCellIndex.row+=4;
+					break;
+				case LASTFOURCOLUMNS:
+					tempCellIndex.column+=4;
+					break;
 				default:
 					throw new DMLRuntimeException("unrecognized correctionLocation: "+op.aggOp.correctionLocation);	
 			}
@@ -4497,20 +4430,24 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		
 		if(sparse)
 		{
-			if(sparseRows!=null)
+			if(sparseBlock!=null)
 			{
-				for(r=0; r<Math.min(rlen, sparseRows.length); r++)
+				SparseBlock a = sparseBlock;
+				
+				for(r=0; r<Math.min(rlen, a.numRows()); r++)
 				{
-					if(sparseRows[r]==null) 
+					if(a.isEmpty(r)) 
 						continue;
-					int[] cols=sparseRows[r].getIndexContainer();
-					double[] values=sparseRows[r].getValueContainer();
-					for(int i=0; i<sparseRows[r].size(); i++)
-					{
-						tempCellIndex.set(r, cols[i]);
+					int apos = a.pos(r);
+					int alen = a.size(r);
+					int[] aix = a.indexes(r);
+					double[] aval = a.values(r);
+					
+					for(int i=apos; i<apos+alen; i++) {
+						tempCellIndex.set(r, aix[i]);
 						op.indexFn.execute(tempCellIndex, tempCellIndex);
-						incrementalAggregateUnaryHelp(op.aggOp, result, tempCellIndex.row, tempCellIndex.column, values[i], buffer);
-
+						incrementalAggregateUnaryHelp(op.aggOp, result, 
+								tempCellIndex.row, tempCellIndex.column, aval[i], buffer);
 					}
 				}
 			}
@@ -4639,19 +4576,36 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}
 		
 		//determine number of rows/cols to be removed
-		int step = ( correctionLocation==CorrectionLocationType.LASTTWOROWS 
-				    || correctionLocation==CorrectionLocationType.LASTTWOCOLUMNS) ? 2 : 1;
+		int step;
+		switch (correctionLocation) {
+			case LASTROW:
+			case LASTCOLUMN:
+				step = 1;
+				break;
+			case LASTTWOROWS:
+			case LASTTWOCOLUMNS:
+				step = 2;
+				break;
+			case LASTFOURROWS:
+			case LASTFOURCOLUMNS:
+				step = 4;
+				break;
+			default:
+				step = 0;
+		}
+
 		
-		//e.g., colSums, colMeans, colMaxs, colMeans
-		if(   correctionLocation==CorrectionLocationType.LASTROW 
-		   || correctionLocation==CorrectionLocationType.LASTTWOROWS )
+		//e.g., colSums, colMeans, colMaxs, colMeans, colVars
+		if(   correctionLocation==CorrectionLocationType.LASTROW
+		   || correctionLocation==CorrectionLocationType.LASTTWOROWS
+		   || correctionLocation==CorrectionLocationType.LASTFOURROWS )
 		{
 			if( sparse ) //SPARSE
 			{
-				if(sparseRows!=null)
+				if(sparseBlock!=null)
 					for(int i=1; i<=step; i++)
-						if(sparseRows[rlen-i]!=null)
-							this.nonZeros-=sparseRows[rlen-i].size();
+						if(!sparseBlock.isEmpty(rlen-i))
+							this.nonZeros-=sparseBlock.size(rlen-i);
 			}
 			else //DENSE
 			{
@@ -4665,22 +4619,26 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			rlen -= step;
 		}
 		
-		//e.g., rowSums, rowsMeans, rowsMaxs, rowsMeans
-		if(   correctionLocation==CorrectionLocationType.LASTCOLUMN 
-		   || correctionLocation==CorrectionLocationType.LASTTWOCOLUMNS )
+		//e.g., rowSums, rowsMeans, rowsMaxs, rowsMeans, rowVars
+		else if(   correctionLocation==CorrectionLocationType.LASTCOLUMN
+		        || correctionLocation==CorrectionLocationType.LASTTWOCOLUMNS
+		        || correctionLocation==CorrectionLocationType.LASTFOURCOLUMNS )
 		{
 			if(sparse) //SPARSE
 			{
-				if(sparseRows!=null)
+				if(sparseBlock!=null)
 				{
-					for(int r=0; r<Math.min(rlen, sparseRows.length); r++)
-						if(sparseRows[r]!=null)
+					for(int r=0; r<Math.min(rlen, sparseBlock.numRows()); r++)
+						if(!sparseBlock.isEmpty(r))
 						{
-							int newSize=sparseRows[r].searchIndexesFirstGTE(clen-step);
-							if(newSize>=0)
+							int newSize=sparseBlock.posFIndexGTE(r, clen-step);
+							if(newSize >= 0)
 							{
-								this.nonZeros-=sparseRows[r].size()-newSize;
-								sparseRows[r].truncate(newSize);
+								this.nonZeros-=sparseBlock.size(r)-newSize;
+								int pos = sparseBlock.pos(r);
+								int cl = sparseBlock.indexes(r)[pos+newSize-1];
+								sparseBlock.deleteIndexRange(r, cl+1, clen);
+								//TODO perf sparse block: truncate replaced by deleteIndexRange
 							}
 						}
 				}
@@ -4740,15 +4698,17 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}
 		
 		int nzcount = 0;
-		if(sparse && sparseRows!=null) //SPARSE
+		if(sparse && sparseBlock!=null) //SPARSE
 		{
-			for(int r=0; r<Math.min(rlen, sparseRows.length); r++)
+			for(int r=0; r<Math.min(rlen, sparseBlock.numRows()); r++)
 			{
-				if(sparseRows[r]==null) 
+				if(sparseBlock.isEmpty(r)) 
 					continue;
-				double[] values=sparseRows[r].getValueContainer();
-				for(int i=0; i<sparseRows[r].size(); i++) {
-					op.fn.execute(cmobj, values[i]);
+				int apos = sparseBlock.pos(r);
+				int alen = sparseBlock.size(r);
+				double[] avals = sparseBlock.values(r);
+				for(int i=apos; i<apos+alen; i++) {
+					op.fn.execute(cmobj, avals[i]);
 					nzcount++;
 				}
 			}
@@ -4779,7 +4739,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}
 		
 		CM_COV_Object cmobj = new CM_COV_Object();
-		if (sparse && sparseRows!=null) //SPARSE
+		if (sparse && sparseBlock!=null) //SPARSE
 		{
 			for(int i=0; i < rlen; i++) 
 				op.fn.execute(cmobj, this.quickGetValue(i,0), weights.quickGetValue(i,0));
@@ -4818,7 +4778,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}
 		
 		CM_COV_Object covobj = new CM_COV_Object();
-		if(sparse && sparseRows!=null) //SPARSE
+		if(sparse && sparseBlock!=null) //SPARSE
 		{
 			for(int i=0; i < rlen; i++ ) 
 				op.fn.execute(covobj, this.quickGetValue(i,0), that.quickGetValue(i,0));
@@ -4862,7 +4822,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}
 		
 		CM_COV_Object covobj = new CM_COV_Object();
-		if(sparse && sparseRows!=null) //SPARSE
+		if(sparse && sparseBlock!=null) //SPARSE
 		{
 			for(int i=0; i < rlen; i++ ) 
 				op.fn.execute(covobj, this.quickGetValue(i,0), that.quickGetValue(i,0), weights.quickGetValue(i,0));
@@ -5421,27 +5381,25 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			if( pattern != 0d ) //SPARSE <- SPARSE (sparse-safe)
 			{
 				ret.allocateSparseRowsBlock();
-				SparseRow[] a = sparseRows;
-				SparseRow[] c = ret.sparseRows;
+				SparseBlock a = sparseBlock;
+				SparseBlock c = ret.sparseBlock;
 				
-				for( int i=0; i<rlen; i++ )
-				{
-					SparseRow arow = a[ i ];
-					if( arow!=null && !arow.isEmpty() )
+				for( int i=0; i<rlen; i++ ) {
+					if( !a.isEmpty(i) )
 					{
-						SparseRow crow = new SparseRow(arow.size());
-						int alen = arow.size();
-						int[] aix = arow.getIndexContainer();
-						double[] avals = arow.getValueContainer();
-						for( int j=0; j<alen; j++ )
+						c.allocate(i);
+						int apos = a.pos(i);
+						int alen = a.size(i);
+						int[] aix = a.indexes(i);
+						double[] avals = a.values(i);
+						for( int j=apos; j<apos+alen; j++ )
 						{
 							double val = avals[j];
 							if( val== pattern || (NaNpattern && Double.isNaN(val)) )
-								crow.append(aix[j], replacement);
+								c.append(i, aix[j], replacement);
 							else
-								crow.append(aix[j], val);
+								c.append(i, aix[j], val);
 						}
-						c[ i ] = crow;
 					}
 				}
 			}
@@ -5449,7 +5407,7 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			{
 				ret.sparse = false;
 				ret.allocateDenseBlock();	
-				SparseRow[] a = sparseRows;
+				SparseBlock a = sparseBlock;
 				double[] c = ret.denseBlock;
 				
 				//initialize with replacement (since all 0 values, see SPARSITY_TURN_POINT)
@@ -5459,13 +5417,13 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 				if( a != null  ) //check for empty matrix
 					for( int i=0, cix=0; i<rlen; i++, cix+=clen )
 					{
-						SparseRow arow = a[ i ];
-						if( arow!=null && !arow.isEmpty() )
+						if( !a.isEmpty(i) )
 						{
-							int alen = arow.size();
-							int[] aix = arow.getIndexContainer();
-							double[] avals = arow.getValueContainer();
-							for( int j=0; j<alen; j++ )
+							int apos = a.pos(i);
+							int alen = a.size(i);
+							int[] aix = a.indexes(i);
+							double[] avals = a.values(i);
+							for( int j=apos; j<apos+alen; j++ )
 								if( avals[ j ] != 0 )
 									c[ cix+aix[j] ] = avals[ j ];
 						}
@@ -5649,25 +5607,25 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 			if( this.isEmptyBlock(false) && that.isEmptyBlock(false) )
 				return;
 			
-			SparseRow[] a = this.sparseRows;
-			SparseRow[] b = that.sparseRows;
+			SparseBlock a = this.sparseBlock;
+			SparseBlock b = that.sparseBlock;
 			for( int i=0; i<rlen; i++ )
 			{
-				SparseRow arow = a[i];
-				SparseRow brow = b[i];
-				if( arow != null && !arow.isEmpty() )
+				if( !a.isEmpty(i) )
 				{
-					int alen = arow.size();
-					double[] avals = arow.getValueContainer();
-					double[] bvals = brow.getValueContainer();
+					int alen = a.size(i);
+					int apos = a.pos(i);
+					double[] avals = a.values(i);
+					int bpos = b.pos(i);
+					double[] bvals = b.values(i); 
 					
 					if( resultBlock == null ) {
 						for( int j=0; j<alen; j++ )
-							ctable.execute(avals[j], bvals[j], w, ignoreZeros, resultMap);		
+							ctable.execute(avals[apos+j], bvals[bpos+j], w, ignoreZeros, resultMap);		
 					}
 					else {
 						for( int j=0; j<alen; j++ )
-							ctable.execute(avals[j], bvals[j], w, ignoreZeros, resultBlock);			
+							ctable.execute(avals[apos+j], bvals[bpos+j], w, ignoreZeros, resultBlock);			
 					}
 				}
 			}	
@@ -5833,10 +5791,15 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		}	
 		else if( qop.wtype3 != null ){ //wdivmm
 			//note: for wdivmm-minus X and W interchanged because W always present 
+			MatrixBlock W = qop.wtype3.hasFourInputs() ? checkType(wm) : null;
+			if( qop.getScalar() != 0 ) {
+				W = new MatrixBlock(1, 1, false);
+				W.quickSetValue(0, 0, qop.getScalar());
+			}
 			if( k > 1 )
-				LibMatrixMult.matrixMultWDivMM(X, U, V, R, qop.wtype3, k);
+				LibMatrixMult.matrixMultWDivMM(X, U, V, W, R, qop.wtype3, k);
 			else
-				LibMatrixMult.matrixMultWDivMM(X, U, V, R, qop.wtype3);	
+				LibMatrixMult.matrixMultWDivMM(X, U, V, W, R, qop.wtype3);	
 		}
 		else if( qop.wtype4 != null ){ //wcemm
 			if( k > 1 )
@@ -6137,29 +6100,14 @@ public class MatrixBlock extends MatrixValue implements Externalizable
 		
 		if(sparse)
 		{
-			int len=0;
-			if(sparseRows!=null)
-				len = Math.min(rlen, sparseRows.length);
-			int i=0;
-			for(; i<len; i++)
-			{
-				sb.append("row +");
-				sb.append(i);
-				sb.append(": ");
-				sb.append(sparseRows[i]);
-				sb.append("\n");
-			}
-			for(; i<rlen; i++)
-			{
-				sb.append("row +");
-				sb.append(i);
-				sb.append(": null\n");
+			if( sparseBlock != null ) {
+				//overloaded implementation in sparse blocks
+				sb.append(sparseBlock.toString());
 			}
 		}
 		else
 		{
-			if(denseBlock!=null)
-			{
+			if(denseBlock!=null) {
 				for(int i=0, ix=0; i<rlen; i++, ix+=clen) {
 					for(int j=0; j<clen; j++) {
 						sb.append(this.denseBlock[ix+j]);

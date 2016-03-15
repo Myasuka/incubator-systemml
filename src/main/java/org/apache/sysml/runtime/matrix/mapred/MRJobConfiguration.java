@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.TreeMap;
 
@@ -42,7 +43,6 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.lib.CombineSequenceFileInputFormat;
 import org.apache.hadoop.mapred.lib.MultipleOutputs;
 import org.apache.hadoop.mapred.lib.NullOutputFormat;
-
 import org.apache.sysml.api.DMLScript;
 import org.apache.sysml.conf.ConfigurationManager;
 import org.apache.sysml.conf.DMLConfig;
@@ -273,12 +273,12 @@ public class MRJobConfiguration
 	
 	public static final int getMiscMemRequired(JobConf job)
 	{
-		return job.getInt("io.file.buffer.size", 4096);
+		return job.getInt(MRConfigurationNames.IO_FILE_BUFFER_SIZE, 4096);
 	}
 	
 	public static final int getJVMMaxMemSize(JobConf job)
 	{
-		String str=job.get("mapred.child.java.opts");
+		String str=job.get(MRConfigurationNames.MR_CHILD_JAVA_OPTS);
 		int start=str.indexOf("-Xmx");
 		if(start<0)
 			return 209715200; //default 200MB
@@ -424,7 +424,7 @@ public class MRJobConfiguration
 			String uniqueSubdir = tmp.toString();
 			
 			//unique local dir
-			String[] dirlist = job.get("mapred.local.dir","/tmp").split(",");
+			String[] dirlist = job.get(MRConfigurationNames.MR_CLUSTER_LOCAL_DIR,"/tmp").split(",");
 			StringBuilder sb2 = new StringBuilder();
 			for( String dir : dirlist ) {
 				if( sb2.length()>0 )
@@ -432,29 +432,29 @@ public class MRJobConfiguration
 				sb2.append(dir);
 				sb2.append( uniqueSubdir );
 			}
-			job.set("mapred.local.dir", sb2.toString() );			
+			job.set(MRConfigurationNames.MR_CLUSTER_LOCAL_DIR, sb2.toString() );
 			
 			//unique system dir 
-			job.set("mapred.system.dir", job.get("mapred.system.dir") + uniqueSubdir);
+			job.set(MRConfigurationNames.MR_JOBTRACKER_SYSTEM_DIR, job.get(MRConfigurationNames.MR_JOBTRACKER_SYSTEM_DIR) + uniqueSubdir);
 			
 			//unique staging dir 
-			job.set( "mapreduce.jobtracker.staging.root.dir",  job.get("mapreduce.jobtracker.staging.root.dir") + uniqueSubdir );
+			job.set( MRConfigurationNames.MR_JOBTRACKER_STAGING_ROOT_DIR,  job.get(MRConfigurationNames.MR_JOBTRACKER_STAGING_ROOT_DIR) + uniqueSubdir );
 		}
 	}
 	
 	public static String getLocalWorkingDirPrefix(JobConf job)
 	{
-		return job.get("mapred.local.dir");
+		return job.get(MRConfigurationNames.MR_CLUSTER_LOCAL_DIR);
 	}
 	
 	public static String getSystemWorkingDirPrefix(JobConf job)
 	{
-		return job.get("mapred.system.dir");
+		return job.get(MRConfigurationNames.MR_JOBTRACKER_SYSTEM_DIR);
 	}
 	
 	public static String getStagingWorkingDirPrefix(JobConf job)
 	{
-		return job.get("mapreduce.jobtracker.staging.root.dir");
+		return job.get(MRConfigurationNames.MR_JOBTRACKER_STAGING_ROOT_DIR);
 	}
 	
 	/**
@@ -465,7 +465,7 @@ public class MRJobConfiguration
 	{
 		String dir = DMLConfig.LOCAL_MR_MODE_STAGING_DIR + 
 		             Lop.FILE_SEPARATOR + Lop.PROCESS_PREFIX + DMLScript.getUUID() + Lop.FILE_SEPARATOR;
-		job.set( "mapreduce.jobtracker.staging.root.dir", dir );
+		job.set( MRConfigurationNames.MR_JOBTRACKER_STAGING_ROOT_DIR, dir );
 	}
 
 	public static void setInputInfo(JobConf job, byte input, InputInfo inputinfo, 
@@ -773,7 +773,7 @@ public class MRJobConfiguration
 	
 	public static String getResultMergeStagingDir( JobConf job )
 	{
-		return job.get(RESULTMERGE_STAGING_DIR_CONFIG) + job.get("mapred.tip.id");
+		return job.get(RESULTMERGE_STAGING_DIR_CONFIG) + job.get(MRConfigurationNames.MR_TASK_ID);
 	}
 	
 	public static long[] getResultMergeMatrixCharacteristics( JobConf job )
@@ -826,7 +826,7 @@ public class MRJobConfiguration
 			matrices[i]=new Path(matrices[i]).toString();
 		
 		FileSystem fs=FileSystem.get(job);
-		Path thisFile=new Path(job.get("map.input.file")).makeQualified(fs);
+		Path thisFile=new Path(job.get(MRConfigurationNames.MR_MAP_INPUT_FILE)).makeQualified(fs);
 		
 		//Path p=new Path(thisFileName);
 		
@@ -835,7 +835,7 @@ public class MRJobConfiguration
 		for(int i=0; i<matrices.length; i++)
 		{
 			Path p = new Path(matrices[i]).makeQualified(fs);
-			if(thisFile.toUri().compareTo(p.toUri())==0 || thisDir.toUri().compareTo(p.toUri())==0)
+			if(thisFile.toUri().equals(p.toUri()) || thisDir.toUri().equals(p.toUri()))
 				representativeMatrixes.add(indexes[i]);
 		}
 		return representativeMatrixes;
@@ -1191,11 +1191,11 @@ public class MRJobConfiguration
 			//(the single input constraint stems from internal runtime assumptions used to relate meta data to inputs)
 			long sizeSortBuff = InfrastructureAnalyzer.getRemoteMaxMemorySortBuffer();
 			long sizeHDFSBlk = InfrastructureAnalyzer.getHDFSBlockSize();
-			long newSplitSize = sizeHDFSBlk * 2;
-			double spillPercent = job.getDouble("mapreduce.map.sort.spill.percent", 1.0);
+			long newSplitSize = sizeHDFSBlk * 2; //use generic config api for backwards compatibility
+			double spillPercent = Double.parseDouble(job.get(MRConfigurationNames.MR_MAP_SORT_SPILL_PERCENT, "1.0"));
 			int numPMap = OptimizerUtils.getNumMappers();
 			if( numPMap < totalInputSize/newSplitSize && sizeSortBuff*spillPercent >= newSplitSize && lpaths.size()==1 ) {
-				job.setLong("mapreduce.input.fileinputformat.split.maxsize", newSplitSize);	
+				job.setLong(MRConfigurationNames.MR_INPUT_FILEINPUTFORMAT_SPLIT_MAXSIZE, newSplitSize);
 				combineInputFormat = true;
 			}
 		}
@@ -1919,8 +1919,22 @@ public class MRJobConfiguration
 	
 	public static void addBinaryBlockSerializationFramework( Configuration job )
 	{
-		String frameworkList = job.get("io.serializations");
+		String frameworkList = job.get(MRConfigurationNames.IO_SERIALIZATIONS);
 		String frameworkClassBB = BinaryBlockSerialization.class.getCanonicalName();
-		job.set("io.serializations", frameworkClassBB+","+frameworkList);
+		job.set(MRConfigurationNames.IO_SERIALIZATIONS, frameworkClassBB+","+frameworkList);
+	}
+	
+	/**
+	 * Set all configurations with prefix mapred or mapreduce that exist in the given
+	 * DMLConfig into the given JobConf.
+	 * 
+	 * @param job
+	 * @param config
+	 */
+	public static void setupCustomMRConfigurations( JobConf job, DMLConfig config ) {
+		Map<String,String> map = config.getCustomMRConfig();
+		for( Entry<String,String> e : map.entrySet() ) {
+			job.set(e.getKey(), e.getValue());
+		}
 	}
 }

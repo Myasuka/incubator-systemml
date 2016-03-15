@@ -676,13 +676,13 @@ public class YarnClusterAnalyzer
 				throw new YarnException("There are no available nodes in the yarn cluster");
 			
 			// Now get the default cluster settings
-			_remoteMRSortMem = (1024*1024) * conf.getLong("io.sort.mb",100); //100MB
+			_remoteMRSortMem = (1024*1024) * conf.getLong(MRConfigurationNames.MR_TASK_IO_SORT_MB,100); //100MB
 
 			//handle jvm max mem (map mem budget is relevant for map-side distcache and parfor)
 			//(for robustness we probe both: child and map configuration parameters)
-			String javaOpts1 = conf.get("mapred.child.java.opts"); //internally mapred/mapreduce synonym
-			String javaOpts2 = conf.get("mapreduce.map.java.opts", null); //internally mapred/mapreduce synonym
-			String javaOpts3 = conf.get("mapreduce.reduce.java.opts", null); //internally mapred/mapreduce synonym
+			String javaOpts1 = conf.get(MRConfigurationNames.MR_CHILD_JAVA_OPTS); //internally mapred/mapreduce synonym
+			String javaOpts2 = conf.get(MRConfigurationNames.MR_MAP_JAVA_OPTS, null); //internally mapred/mapreduce synonym
+			String javaOpts3 = conf.get(MRConfigurationNames.MR_REDUCE_JAVA_OPTS, null); //internally mapred/mapreduce synonym
 			if( javaOpts2 != null ) //specific value overrides generic
 				_remoteJVMMaxMemMap = extractMaxMemoryOpt(javaOpts2); 
 			else
@@ -693,14 +693,14 @@ public class YarnClusterAnalyzer
 				_remoteJVMMaxMemReduce = extractMaxMemoryOpt(javaOpts1);
 			
 			//HDFS blocksize
-			String blocksize = conf.get(MRConfigurationNames.DFS_BLOCK_SIZE, "134217728");
+			String blocksize = conf.get(MRConfigurationNames.DFS_BLOCKSIZE, "134217728");
 			_blocksize = Long.parseLong(blocksize);
 			
 			minimalPhyAllocate = (long) 1024 * 1024 * conf.getInt(YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB, 
 					YarnConfiguration.DEFAULT_RM_SCHEDULER_MINIMUM_ALLOCATION_MB);
 			maximumPhyAllocate = (long) 1024 * 1024 * conf.getInt(YarnConfiguration.RM_SCHEDULER_MAXIMUM_ALLOCATION_MB, 
 					YarnConfiguration.DEFAULT_RM_SCHEDULER_MAXIMUM_ALLOCATION_MB);
-			mrAMPhy = (long)conf.getInt("yarn.app.mapreduce.am.resource.mb", 1536) * 1024 * 1024;
+			mrAMPhy = (long)conf.getInt(MRConfigurationNames.YARN_APP_MR_AM_RESOURCE_MB, 1536) * 1024 * 1024;
 			
 		} catch (Exception e) {
 			throw new RuntimeException("Unable to analyze yarn cluster ", e);

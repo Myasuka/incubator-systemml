@@ -682,7 +682,12 @@ public class Explain
 		               + hop.getDim2() + "," 
 				       + hop.getRowsInBlock() + "," 
 		               + hop.getColsInBlock() + "," 
-				       + hop.getNnz() + "]");
+				       + hop.getNnz());
+		
+		if (hop.getUpdateInPlace())
+			sb.append("," + hop.getUpdateInPlace());
+		
+		sb.append("]");
 		
 		//memory estimates
 		sb.append(" [" + showMem(hop.getInputMemEstimate(), false) + "," 

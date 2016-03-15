@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -76,12 +76,12 @@ import org.apache.sysml.runtime.instructions.spark.WriteSPInstruction;
 import org.apache.sysml.runtime.instructions.spark.ZipmmSPInstruction;
 
 
-public class SPInstructionParser extends InstructionParser 
-{	
+public class SPInstructionParser extends InstructionParser
+{
 	public static final HashMap<String, SPINSTRUCTION_TYPE> String2SPInstructionType;
 	static {
 		String2SPInstructionType = new HashMap<String, SPInstruction.SPINSTRUCTION_TYPE>();
-		
+
 		//unary aggregate operators
 		String2SPInstructionType.put( "uak+"   	, SPINSTRUCTION_TYPE.AggregateUnary);
 		String2SPInstructionType.put( "uark+"   , SPINSTRUCTION_TYPE.AggregateUnary);
@@ -119,25 +119,25 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( "pmm"        , SPINSTRUCTION_TYPE.PMM);
 		String2SPInstructionType.put( "zipmm"      , SPINSTRUCTION_TYPE.ZIPMM);
 		String2SPInstructionType.put( "pmapmm"     , SPINSTRUCTION_TYPE.PMAPMM);
-		
-		
+
+
 		String2SPInstructionType.put( "uaggouterchain", SPINSTRUCTION_TYPE.UaggOuterChain);
-		
+
 		//ternary aggregate operators
 		String2SPInstructionType.put( "tak+*"      , SPINSTRUCTION_TYPE.AggregateTernary);
 
-		
+
 		String2SPInstructionType.put( "rangeReIndex"   	, SPINSTRUCTION_TYPE.MatrixIndexing);
 		String2SPInstructionType.put( "leftIndex"   	, SPINSTRUCTION_TYPE.MatrixIndexing);
 		String2SPInstructionType.put( "mapLeftIndex"   	, SPINSTRUCTION_TYPE.MatrixIndexing);
-		
+
 		// Reorg Instruction Opcodes (repositioning of existing values)
 		String2SPInstructionType.put( "r'"   	   , SPINSTRUCTION_TYPE.Reorg);
 		String2SPInstructionType.put( "rev"   	   , SPINSTRUCTION_TYPE.Reorg);
 		String2SPInstructionType.put( "rdiag"      , SPINSTRUCTION_TYPE.Reorg);
 		String2SPInstructionType.put( "rshape"     , SPINSTRUCTION_TYPE.MatrixReshape);
 		String2SPInstructionType.put( "rsort"      , SPINSTRUCTION_TYPE.Reorg);
-		
+
 		String2SPInstructionType.put( "+"    , SPINSTRUCTION_TYPE.ArithmeticBinary);
 		String2SPInstructionType.put( "-"    , SPINSTRUCTION_TYPE.ArithmeticBinary);
 		String2SPInstructionType.put( "*"    , SPINSTRUCTION_TYPE.ArithmeticBinary);
@@ -146,8 +146,8 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( "%/%"  , SPINSTRUCTION_TYPE.ArithmeticBinary);
 		String2SPInstructionType.put( "1-*"  , SPINSTRUCTION_TYPE.ArithmeticBinary);
 		String2SPInstructionType.put( "^"    , SPINSTRUCTION_TYPE.ArithmeticBinary);
-		String2SPInstructionType.put( "^2"   , SPINSTRUCTION_TYPE.ArithmeticBinary); 
-		String2SPInstructionType.put( "*2"   , SPINSTRUCTION_TYPE.ArithmeticBinary); 
+		String2SPInstructionType.put( "^2"   , SPINSTRUCTION_TYPE.ArithmeticBinary);
+		String2SPInstructionType.put( "*2"   , SPINSTRUCTION_TYPE.ArithmeticBinary);
 		String2SPInstructionType.put( "map+"    , SPINSTRUCTION_TYPE.ArithmeticBinary);
 		String2SPInstructionType.put( "map-"    , SPINSTRUCTION_TYPE.ArithmeticBinary);
 		String2SPInstructionType.put( "map*"    , SPINSTRUCTION_TYPE.ArithmeticBinary);
@@ -162,31 +162,31 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( "map<="   , SPINSTRUCTION_TYPE.RelationalBinary);
 		String2SPInstructionType.put( "map=="   , SPINSTRUCTION_TYPE.RelationalBinary);
 		String2SPInstructionType.put( "map!="   , SPINSTRUCTION_TYPE.RelationalBinary);
-		
-		// Relational Instruction Opcodes 
+
+		// Relational Instruction Opcodes
 		String2SPInstructionType.put( "=="   , SPINSTRUCTION_TYPE.RelationalBinary);
 		String2SPInstructionType.put( "!="   , SPINSTRUCTION_TYPE.RelationalBinary);
 		String2SPInstructionType.put( "<"    , SPINSTRUCTION_TYPE.RelationalBinary);
 		String2SPInstructionType.put( ">"    , SPINSTRUCTION_TYPE.RelationalBinary);
 		String2SPInstructionType.put( "<="   , SPINSTRUCTION_TYPE.RelationalBinary);
 		String2SPInstructionType.put( ">="   , SPINSTRUCTION_TYPE.RelationalBinary);
-		
-		// REBLOCK Instruction Opcodes 
+
+		// REBLOCK Instruction Opcodes
 		String2SPInstructionType.put( "rblk"   , SPINSTRUCTION_TYPE.Reblock);
 		String2SPInstructionType.put( "csvrblk", SPINSTRUCTION_TYPE.CSVReblock);
-	
+
 		// Spark-specific instructions
 		String2SPInstructionType.put( Checkpoint.OPCODE, SPINSTRUCTION_TYPE.Checkpoint);
-		
-		// Builtin Instruction Opcodes 
+
+		// Builtin Instruction Opcodes
 		String2SPInstructionType.put( "log"  , SPINSTRUCTION_TYPE.Builtin);
 		String2SPInstructionType.put( "log_nz"  , SPINSTRUCTION_TYPE.Builtin);
-		
+
 		String2SPInstructionType.put( "max"  , SPINSTRUCTION_TYPE.BuiltinBinary);
 		String2SPInstructionType.put( "min"  , SPINSTRUCTION_TYPE.BuiltinBinary);
 		String2SPInstructionType.put( "mapmax"  , SPINSTRUCTION_TYPE.BuiltinBinary);
 		String2SPInstructionType.put( "mapmin"  , SPINSTRUCTION_TYPE.BuiltinBinary);
-		
+
 		String2SPInstructionType.put( "exp"   , SPINSTRUCTION_TYPE.BuiltinUnary);
 		String2SPInstructionType.put( "abs"   , SPINSTRUCTION_TYPE.BuiltinUnary);
 		String2SPInstructionType.put( "sin"   , SPINSTRUCTION_TYPE.BuiltinUnary);
@@ -204,7 +204,7 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( "sprop", SPINSTRUCTION_TYPE.BuiltinUnary);
 		String2SPInstructionType.put( "sigmoid", SPINSTRUCTION_TYPE.BuiltinUnary);
 		String2SPInstructionType.put( "sel+", SPINSTRUCTION_TYPE.BuiltinUnary);
-		
+
 		// Parameterized Builtin Functions
 		String2SPInstructionType.put( "groupedagg"	 , SPINSTRUCTION_TYPE.ParameterizedBuiltin);
 		String2SPInstructionType.put( "mapgroupedagg", SPINSTRUCTION_TYPE.ParameterizedBuiltin);
@@ -212,20 +212,20 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( "replace"	     , SPINSTRUCTION_TYPE.ParameterizedBuiltin);
 		String2SPInstructionType.put( "rexpand"	     , SPINSTRUCTION_TYPE.ParameterizedBuiltin);
 		String2SPInstructionType.put( "transform"    , SPINSTRUCTION_TYPE.ParameterizedBuiltin);
-		
+
 		String2SPInstructionType.put( "mappend", SPINSTRUCTION_TYPE.MAppend);
 		String2SPInstructionType.put( "rappend", SPINSTRUCTION_TYPE.RAppend);
 		String2SPInstructionType.put( "gappend", SPINSTRUCTION_TYPE.GAppend);
 		String2SPInstructionType.put( "galignedappend", SPINSTRUCTION_TYPE.GAlignedAppend);
-		
+
 		String2SPInstructionType.put( DataGen.RAND_OPCODE  , SPINSTRUCTION_TYPE.Rand);
 		String2SPInstructionType.put( DataGen.SEQ_OPCODE   , SPINSTRUCTION_TYPE.Rand);
 		String2SPInstructionType.put( DataGen.SAMPLE_OPCODE, SPINSTRUCTION_TYPE.Rand);
-		
+
 		//ternary instruction opcodes
 		String2SPInstructionType.put( "ctable", SPINSTRUCTION_TYPE.Ternary);
 		String2SPInstructionType.put( "ctableexpand", SPINSTRUCTION_TYPE.Ternary);
-		
+
 		//quaternary instruction opcodes
 		String2SPInstructionType.put( WeightedSquaredLoss.OPCODE,  SPINSTRUCTION_TYPE.Quaternary);
 		String2SPInstructionType.put( WeightedSquaredLossR.OPCODE, SPINSTRUCTION_TYPE.Quaternary);
@@ -237,7 +237,7 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( WeightedCrossEntropyR.OPCODE,SPINSTRUCTION_TYPE.Quaternary);
 		String2SPInstructionType.put( WeightedUnaryMM.OPCODE,      SPINSTRUCTION_TYPE.Quaternary);
 		String2SPInstructionType.put( WeightedUnaryMMR.OPCODE,     SPINSTRUCTION_TYPE.Quaternary);
-		
+
 		//cumsum/cumprod/cummin/cummax
 		String2SPInstructionType.put( "ucumack+"  , SPINSTRUCTION_TYPE.CumsumAggregate);
 		String2SPInstructionType.put( "ucumac*"   , SPINSTRUCTION_TYPE.CumsumAggregate);
@@ -253,19 +253,19 @@ public class SPInstructionParser extends InstructionParser
 		String2SPInstructionType.put( "cov"    , SPINSTRUCTION_TYPE.Covariance);
 		String2SPInstructionType.put( "qsort"  , SPINSTRUCTION_TYPE.QSort);
 		String2SPInstructionType.put( "qpick"  , SPINSTRUCTION_TYPE.QPick);
-		
+
 		String2SPInstructionType.put( "binuaggchain", SPINSTRUCTION_TYPE.BinUaggChain);
-		
+
 		String2SPInstructionType.put( "write"   , SPINSTRUCTION_TYPE.Write);
 	}
 
-	public static SPInstruction parseSingleInstruction (String str ) 
-		throws DMLUnsupportedOperationException, DMLRuntimeException 
+	public static SPInstruction parseSingleInstruction (String str )
+		throws DMLUnsupportedOperationException, DMLRuntimeException
 	{
 		if ( str == null || str.isEmpty() )
 			return null;
 
-		SPINSTRUCTION_TYPE cptype = InstructionUtils.getSPType(str); 
+		SPINSTRUCTION_TYPE cptype = InstructionUtils.getSPType(str);
 		if ( cptype == null )
 			// return null;
 			throw new DMLUnsupportedOperationException("Invalid SP Instruction Type: " + str);
@@ -274,15 +274,16 @@ public class SPInstructionParser extends InstructionParser
 			throw new DMLRuntimeException("Unable to parse instruction: " + str);
 		return spinst;
 	}
-	
-	public static SPInstruction parseSingleInstruction ( SPINSTRUCTION_TYPE sptype, String str ) 
-		throws DMLUnsupportedOperationException, DMLRuntimeException 
-	{	
-		if ( str == null || str.isEmpty() ) 
+
+	public static SPInstruction parseSingleInstruction ( SPINSTRUCTION_TYPE sptype, String str )
+		throws DMLUnsupportedOperationException, DMLRuntimeException
+	{
+		if ( str == null || str.isEmpty() )
 			return null;
-		
+		System.out.println("**** sptype: " + sptype);
+		System.out.println("**** str: " + str);
 		String [] parts = null;
-		switch(sptype) 
+		switch(sptype)
 		{
 			// matrix multiplication instructions
 			case CPMM:
@@ -301,45 +302,45 @@ public class SPInstructionParser extends InstructionParser
 				return ZipmmSPInstruction.parseInstruction(str);
 			case PMAPMM:
 				return PMapmmSPInstruction.parseInstruction(str);
-				
-				
+
+
 			case UaggOuterChain:
 				return UaggOuterChainSPInstruction.parseInstruction(str);
-				
+
 			case AggregateUnary:
 				return AggregateUnarySPInstruction.parseInstruction(str);
-				
+
 			case AggregateTernary:
 				return AggregateTernarySPInstruction.parseInstruction(str);
-				
+
 			case MatrixIndexing:
 				return MatrixIndexingSPInstruction.parseInstruction(str);
-				
+
 			case Reorg:
 				return ReorgSPInstruction.parseInstruction(str);
-				
+
 			case ArithmeticBinary:
 				return ArithmeticBinarySPInstruction.parseInstruction(str);
-				
+
 			case RelationalBinary:
 				return RelationalBinarySPInstruction.parseInstruction(str);
-			
+
 			//ternary instructions
 			case Ternary:
 				return TernarySPInstruction.parseInstruction(str);
-				
+
 			//quaternary instructions
 			case Quaternary:
 				return QuaternarySPInstruction.parseInstruction(str);
-				
-			// Reblock instructions	
+
+			// Reblock instructions
 			case Reblock:
 				return ReblockSPInstruction.parseInstruction(str);
-				
+
 			case CSVReblock:
 				return CSVReblockSPInstruction.parseInstruction(str);
-			
-			case Builtin: 
+
+			case Builtin:
 				parts = InstructionUtils.getInstructionPartsWithValueType(str);
 				if ( parts[0].equals("log") || parts[0].equals("log_nz") ) {
 					if ( parts.length == 3 ) {
@@ -353,61 +354,61 @@ public class SPInstructionParser extends InstructionParser
 				else {
 					throw new DMLRuntimeException("Invalid Builtin Instruction: " + str );
 				}
-				
+
 			case BuiltinBinary:
 				return BuiltinBinarySPInstruction.parseInstruction(str);
-				
+
 			case BuiltinUnary:
 				return BuiltinUnarySPInstruction.parseInstruction(str);
-				
+
 			case ParameterizedBuiltin:
 				return ParameterizedBuiltinSPInstruction.parseInstruction(str);
-				
+
 			case MatrixReshape:
 				return MatrixReshapeSPInstruction.parseInstruction(str);
-				
+
 			case MAppend:
 				return AppendMSPInstruction.parseInstruction(str);
-			
+
 			case GAppend:
 				return AppendGSPInstruction.parseInstruction(str);
-			
+
 			case GAlignedAppend:
 				return AppendGAlignedSPInstruction.parseInstruction(str);
-				
+
 			case RAppend:
 				return AppendRSPInstruction.parseInstruction(str);
-				
+
 			case Rand:
 				return RandSPInstruction.parseInstruction(str);
-				
-			case QSort: 
+
+			case QSort:
 				return QuantileSortSPInstruction.parseInstruction(str);
-			
-			case QPick: 
+
+			case QPick:
 				return QuantilePickSPInstruction.parseInstruction(str);
-			
+
 			case Write:
 				return WriteSPInstruction.parseInstruction(str);
-				
+
 			case CumsumAggregate:
 				return CumulativeAggregateSPInstruction.parseInstruction(str);
-				
+
 			case CumsumOffset:
-				return CumulativeOffsetSPInstruction.parseInstruction(str); 
-		
+				return CumulativeOffsetSPInstruction.parseInstruction(str);
+
 			case CentralMoment:
 				return CentralMomentSPInstruction.parseInstruction(str);
-			
+
 			case Covariance:
 				return CovarianceSPInstruction.parseInstruction(str);
-			
+
 			case BinUaggChain:
 				return BinUaggChainSPInstruction.parseInstruction(str);
-				
+
 			case Checkpoint:
 				return CheckpointSPInstruction.parseInstruction(str);
-				
+
 			case INVALID:
 			default:
 				throw new DMLUnsupportedOperationException("Invalid SP Instruction Type: " + sptype );

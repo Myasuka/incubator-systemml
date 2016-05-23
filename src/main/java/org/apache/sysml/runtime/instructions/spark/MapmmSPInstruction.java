@@ -113,6 +113,8 @@ public class MapmmSPInstruction extends BinarySPInstruction
 		
 		String rddVar = (_type==CacheType.LEFT) ? input2.getName() : input1.getName();
 		String bcastVar = (_type==CacheType.LEFT) ? input1.getName() : input2.getName();
+		System.out.println("input1: " + input1.getName() + ", input2: " + input2.getName());
+		System.out.println("cache _type: " + _type + ",rddVar: " + rddVar + ",bcastVar: " + bcastVar);
 		MatrixCharacteristics mcRdd = sec.getMatrixCharacteristics(rddVar);
 		MatrixCharacteristics mcBc = sec.getMatrixCharacteristics(bcastVar);
 		
@@ -183,6 +185,8 @@ public class MapmmSPInstruction extends BinarySPInstruction
 	 */
 	private static boolean requiresFlatMapFunction( CacheType type, MatrixCharacteristics mcBc)
 	{
+		System.out.println("mcBc rows and cols: " + mcBc.getRows() + ", " + mcBc.getCols());
+		System.out.println("mcBc rows and cols PerBlock: " + mcBc.getRowsPerBlock() + ", " + mcBc.getColsPerBlock());
 		return    (type == CacheType.LEFT && mcBc.getRows() > mcBc.getRowsPerBlock())
 			   || (type == CacheType.RIGHT && mcBc.getCols() > mcBc.getColsPerBlock());
 	}

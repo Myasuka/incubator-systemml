@@ -1761,6 +1761,19 @@ public class AggBinaryOp extends Hop implements MultiThreadedHop
 		//cp memory requirements on spark rdd operations with broadcasts)
 		_spBroadcastMemEstimate = 0;
 
+		String m = OptimizerUtils.getMMMethod();
+		if(m.equals("rmm")){
+			FORCED_MMULT_METHOD = MMultMethod.RMM;
+		}else if(m.equals("mapmm_l")){
+			FORCED_MMULT_METHOD = MMultMethod.MAPMM_L;
+		}else if(m.equals("mapmm_r")){
+			FORCED_MMULT_METHOD = MMultMethod.MAPMM_R;
+		}else if(m.equals("cpmm")){
+			FORCED_MMULT_METHOD = MMultMethod.CPMM;
+		}
+		System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>>> mmmethod: " + m + " <<<<<<<<<<<<<<<<<<<<<<<<");
+
+
 		// Step 0: check for forced mmultmethod
 		if( FORCED_MMULT_METHOD !=null )
 			return FORCED_MMULT_METHOD;
